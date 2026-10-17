@@ -237,6 +237,10 @@ int aot_generate(AProg *p, const AotCodegenOptions *opt, char **out, size_t *out
         if(tg->out==AOT_OUT_C) buf_printf(&o,"; plainpy translates this listing to C (aot/x2c.c)\n");
         buf_printf(&o,"format ELF executable 3\nentry start\n\n");
         if(dyn && tg->out==AOT_OUT_FASM) emit_dynamic_header(&o,p);
+        /* PT_GNU_STACK, read-write: a non-executable stack. Without this header i386 Linux
+           runs the program with every readable page executable (the stack, the data, the
+           heap): any overrun of a buffer with the program's data could then be run as code. */
+        if(tg->out==AOT_OUT_FASM) buf_printf(&o,"segment gnustack readable writeable\n\n");
         int vdso=tg->out==AOT_OUT_FASM && aot_rt_used(g.rt,"rt_sys_clock_gettime");    /* (Linux's clocks read without a system call) */
         if(vdso) rt("rt_vdso_init");
         buf_printf(&o,"segment readable executable\n\nstart:\n%s%s        fninit\n%s%s",aot_rt_used(g.rt,"rt_sys_args")?"        mov [rt_sp0],esp\n":"",

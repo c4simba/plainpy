@@ -24,3 +24,10 @@ for i in reversed(range(2, 5)):
 for w in reversed(["x", "y"]):
     print(w, end=" ")
 print()
+print('%.5d' % -42, '%.5d' % 42, '%+.5d' % 42, '%.0d' % 0, '%.5x' % 42, '%#.5x' % -42, '%08.5d' % -42, '%-8.5d|' % 42, '%#.6o' % 8, '%.3X' % 255, '%.4d' % 3.7, '%10.5d|' % -42)   # a precision on an int: at least that many digits
+# "*": the width / precision from the arguments (a negative width: left; a negative precision: 0)
+sw: int = -6
+sp: int = 2
+spair: tuple[int, int] = (7, 42)
+print(repr('%*d|' % (sw, 5)), repr('%0*d|' % (sw, 5)), repr('%.*d' % (-3, 42)), repr('%.*f' % (-3, 1.5)), repr('%.*s' % (-2, 'abc')), repr('%.*e' % (-1, 1.5)), repr('%.*g' % (-1, 1.5)))
+print(repr('%*s|' % (-5, 'ab')), repr('%-*d|' % (6, 5)), repr('%*.*f|' % (8, sp, 3.14159)), repr('%.*d|' % (sp, -5)), repr('%*d|' % spair), repr('%.*x' % (4, 255)), repr('%*.*s|' % (6, 3, 'héllo')), repr('%#*x|' % (8, 255)), repr('%+*d|' % (6, 5)))

@@ -10,6 +10,7 @@ void mp_repr_into(SBuf *b, Value v);
 
 /* ---------------------------------------------------------------- the spec */
 typedef struct { uint32_t fill; int align, sign, alt, zero, width, group, prec, type, z; } Spec;
+#define MP_FMT_MAX 1000000000   /* a width or precision: at most this (the digits are read into an int) */
 static int parse_spec(const char *s, Spec *sp){
     memset(sp,0,sizeof *sp); sp->fill=' '; sp->prec=-1;
     int64_t n=(int64_t)strlen(s), p=0;
@@ -22,9 +23,10 @@ static int parse_spec(const char *s, Spec *sp){
     if(p<n && s[p]=='z'){ sp->z=1; p++; }
     if(p<n && s[p]=='#'){ sp->alt=1; p++; }
     if(p<n && s[p]=='0'){ sp->zero=1; p++; }
-    while(p<n && s[p]>='0' && s[p]<='9') sp->width=sp->width*10+(s[p++]-'0');
+    while(p<n && s[p]>='0' && s[p]<='9'){ sp->width=sp->width*10+(s[p++]-'0'); if(sp->width>MP_FMT_MAX) mp_raise_t(E_ValueError,"Too many decimal digits in format string"); }
     if(p<n && (s[p]==','||s[p]=='_')) sp->group=s[p++];
-    if(p<n && s[p]=='.'){ p++; if(p>=n || s[p]<'0' || s[p]>'9') return 0; sp->prec=0; while(p<n && s[p]>='0' && s[p]<='9') sp->prec=sp->prec*10+(s[p++]-'0'); }
+    if(p<n && s[p]=='.'){ p++; if(p>=n || s[p]<'0' || s[p]>'9') return 0; sp->prec=0;
+        while(p<n && s[p]>='0' && s[p]<='9'){ sp->prec=sp->prec*10+(s[p++]-'0'); if(sp->prec>MP_FMT_MAX) mp_raise_t(E_ValueError,"Too many decimal digits in format string"); } }
     if(p<n) sp->type=s[p++];
     if(p!=n) return 0;
     if(sp->zero && !sp->align){ sp->fill='0'; sp->align='='; }
@@ -56,6 +58,9 @@ static void fmt_int(SBuf *out, int64_t v, Spec *sp){
     const char *dig= t=='X' ? "0123456789ABCDEF" : "0123456789abcdef";
     do{ digits[nd++]=dig[a%(uint64_t)base]; a/=(uint64_t)base; }while(a);
     char rev[80]; for(int i=0;i<nd;i++) rev[i]=digits[nd-1-i]; rev[nd]=0;
+    char *zbuf=NULL; if(sp->prec>nd){                              /* "%.5d": at least 5 digits (format() refuses a precision) */
+        zbuf=(char*)xmalloc((size_t)sp->prec+1); memset(zbuf,'0',(size_t)(sp->prec-nd)); memcpy(zbuf+sp->prec-nd,rev,(size_t)nd+1); nd=sp->prec; }
+    const char *dg= zbuf ? zbuf : rev;
     char head[8]; int hl=0;
     if(v<0) head[hl++]='-'; else if(sp->sign=='+') head[hl++]='+'; else if(sp->sign==' ') head[hl++]=' ';
     if(sp->alt && base!=10){ head[hl++]='0'; head[hl++]= t=='b'?'b':t=='o'?'o':t=='X'?'X':'x'; }
@@ -68,54 +73,62 @@ static void fmt_int(SBuf *out, int64_t v, Spec *sp){
             /* zero padding takes part in the grouping */
             int64_t want=sp->width-hl; int64_t nds=nd;
             while(nds+(nds-1)/every<want) nds++;
-            char *z=(char*)xmalloc((size_t)nds+1); memset(z,'0',(size_t)(nds-nd)); memcpy(z+nds-nd,rev,(size_t)nd); z[nds]=0;
+            char *z=(char*)xmalloc((size_t)nds+1); memset(z,'0',(size_t)(nds-nd)); memcpy(z+nds-nd,dg,(size_t)nd); z[nds]=0;
             group_digits(&body,z,nds,sp->group,every); free(z);
-        } else group_digits(&body,rev,nd,sp->group,every);
-    } else sb_puts(&body,rev);
+        } else group_digits(&body,dg,nd,sp->group,every);
+    } else sb_puts(&body,dg);
     pad(out,sp,head,body.s?body.s:"",body.n,1);
-    free(body.s);
+    free(body.s); free(zbuf);
 }
 /* the digits of x as %e / %f / %g give them, without the sign */
 static void fmt_float(SBuf *out, double x, Spec *sp){
     int t=sp->type;
+    if(t && !strchr("eEfFgGn%",t)) mp_raise_t(E_ValueError,"Unknown format code '%c' for object of type 'float'",t);
     char head[4]; int hl=0;
     int neg=signbit(x) && !(sp->z && x==0);
     if(isnan(x)) neg=0;
     double ax=fabs(x);
     if(neg) head[hl++]='-'; else if(sp->sign=='+') head[hl++]='+'; else if(sp->sign==' ') head[hl++]=' ';
     head[hl]=0;
-    char buf[512];
     if(isinf(ax) || isnan(ax)){
-        const char *s= isnan(ax) ? "nan" : "inf";
+        char nb[8]; const char *s= isnan(ax) ? "nan" : "inf";
         if(t=='E'||t=='F'||t=='G') s= isnan(ax) ? "NAN" : "INF";
-        if(t=='%'){ snprintf(buf,sizeof buf,"%s%%",s); s=buf; }
+        if(t=='%'){ snprintf(nb,sizeof nb,"%s%%",s); s=nb; }
         Spec sp2=*sp; if(sp2.fill=='0' && sp2.align=='='){ sp2.fill=' '; sp2.align=0; }
         pad(out,&sp2,head,s,(int64_t)strlen(s),1); return;
     }
     int prec=sp->prec;
+    /* The text: %f of a double has up to 309 digits before the point, then the precision's
+       digits; the precision is the program's (any size), so the buffer is sized for it - a
+       fixed one was overrun (".0", "%" appended after a truncated snprintf) or left without
+       the 'e' looked for below. */
+    size_t cap=400+(prec>0?(size_t)prec:0);
+    char sbuf[512], *buf;
+    if(cap<=sizeof sbuf){ buf=sbuf; cap=sizeof sbuf; } else buf=(char*)xmalloc(cap);
     if(!t){
-        if(prec<0){ mp_float_repr(buf,sizeof buf,ax); }
+        if(prec<0){ mp_float_repr(buf,cap,ax); }
         else {
             /* like 'g', but with at least one digit after the point when fixed-point */
             int p= prec==0 ? 1 : prec;
-            snprintf(buf,sizeof buf,"%.*e",p-1,ax);
-            int e=atoi(strchr(buf,'e')+1);
+            snprintf(buf,cap,"%.*e",p-1,ax);
+            char *ep=strchr(buf,'e');
+            int e= ep ? atoi(ep+1) : 0;
             if(e>=-4 && e<p){
-                snprintf(buf,sizeof buf,"%.*f",p-1-e,ax);
+                snprintf(buf,cap,"%.*f",p-1-e,ax);
                 if(!sp->alt && strchr(buf,'.')){ size_t l=strlen(buf); while(buf[l-1]=='0') buf[--l]=0; if(buf[l-1]=='.') { buf[l]='0'; buf[l+1]=0; } }
                 else if(!strchr(buf,'.')) strcat(buf,".0");
             } else {
-                snprintf(buf,sizeof buf,"%.*e",p-1,ax);
-                if(!sp->alt){ char *ep=strchr(buf,'e'), tail[32]; snprintf(tail,sizeof tail,"%s",ep); *ep=0;
+                snprintf(buf,cap,"%.*e",p-1,ax);
+                ep=strchr(buf,'e');
+                if(!sp->alt && ep){ char tail[32]; snprintf(tail,sizeof tail,"%s",ep); *ep=0;
                     if(strchr(buf,'.')){ size_t l=strlen(buf); while(buf[l-1]=='0') buf[--l]=0; if(buf[l-1]=='.') buf[--l]=0; }
                     strcat(buf,tail); }
             }
         }
-    } else if(t=='e'||t=='E'){ snprintf(buf,sizeof buf,sp->alt?"%#.*e":"%.*e",prec<0?6:prec,ax); }
-    else if(t=='f'||t=='F'){ snprintf(buf,sizeof buf,sp->alt?"%#.*f":"%.*f",prec<0?6:prec,ax); }
-    else if(t=='g'||t=='G'||t=='n'){ snprintf(buf,sizeof buf,sp->alt?"%#.*g":"%.*g",prec<0?6:prec==0?1:prec,ax); }
-    else if(t=='%'){ snprintf(buf,sizeof buf,sp->alt?"%#.*f":"%.*f",prec<0?6:prec,ax*100); strcat(buf,"%"); }
-    else mp_raise_t(E_ValueError,"Unknown format code '%c' for object of type 'float'",t);
+    } else if(t=='e'||t=='E'){ snprintf(buf,cap,sp->alt?"%#.*e":"%.*e",prec<0?6:prec,ax); }
+    else if(t=='f'||t=='F'){ snprintf(buf,cap,sp->alt?"%#.*f":"%.*f",prec<0?6:prec,ax); }
+    else if(t=='g'||t=='G'||t=='n'){ snprintf(buf,cap,sp->alt?"%#.*g":"%.*g",prec<0?6:prec==0?1:prec,ax); }
+    else { snprintf(buf,cap,sp->alt?"%#.*f":"%.*f",prec<0?6:prec,ax*100); strcat(buf,"%"); }   /* t=='%' */
     if(t=='E'||t=='G'||t=='F') for(char *q=buf;*q;q++) *q=(char)toupper((unsigned char)*q);
     /* grouping of the integer part */
     if(sp->group){
@@ -129,9 +142,9 @@ static void fmt_float(SBuf *out, double x, Spec *sp){
             group_digits(&g,z,nds,sp->group,3); free(z);
         } else group_digits(&g,buf,nint,sp->group,3);
         sb_puts(&g,dot);
-        pad(out,sp,head,g.s,g.n,1); free(g.s); return;
-    }
-    pad(out,sp,head,buf,(int64_t)strlen(buf),1);
+        pad(out,sp,head,g.s,g.n,1); free(g.s);
+    } else pad(out,sp,head,buf,(int64_t)strlen(buf),1);
+    if(buf!=sbuf) free(buf);
 }
 Value mp_format(Value v, Value specv){
     const char *spec=mp_cstr(specv);
@@ -205,11 +218,11 @@ Value mp_percent_format(Value fmtv, Value args){
         Spec sp; memset(&sp,0,sizeof sp); sp.fill=' '; sp.prec=-1;
         int left=0;
         for(;i<n && strchr("-+ #0",s[i]);i++){ if(s[i]=='-') left=1; else if(s[i]=='+') sp.sign='+'; else if(s[i]==' '){ if(!sp.sign) sp.sign=' '; } else if(s[i]=='#') sp.alt=1; else sp.zero=1; }
-        if(i<n && s[i]=='*'){ if(ai>=argn) mp_raise_t(E_TypeError,"not enough arguments for format string"); sp.width=(int)mp_index(argv[ai++],"*"); if(sp.width<0){ left=1; sp.width=-sp.width; } i++; }
-        else while(i<n && s[i]>='0' && s[i]<='9') sp.width=sp.width*10+(s[i++]-'0');
+        if(i<n && s[i]=='*'){ if(ai>=argn) mp_raise_t(E_TypeError,"not enough arguments for format string"); int64_t w=mp_index(argv[ai++],"*"); if(w<-MP_FMT_MAX || w>MP_FMT_MAX) mp_raise_t(E_ValueError,"width too big"); sp.width=(int)w; if(sp.width<0){ left=1; sp.width=-sp.width; } i++; }
+        else while(i<n && s[i]>='0' && s[i]<='9'){ sp.width=sp.width*10+(s[i++]-'0'); if(sp.width>MP_FMT_MAX) mp_raise_t(E_ValueError,"width too big"); }
         if(i<n && s[i]=='.'){ i++; sp.prec=0;
-            if(i<n && s[i]=='*'){ if(ai>=argn) mp_raise_t(E_TypeError,"not enough arguments for format string"); sp.prec=(int)mp_index(argv[ai++],"*"); i++; }
-            else while(i<n && s[i]>='0' && s[i]<='9') sp.prec=sp.prec*10+(s[i++]-'0'); }
+            if(i<n && s[i]=='*'){ if(ai>=argn) mp_raise_t(E_TypeError,"not enough arguments for format string"); int64_t pr=mp_index(argv[ai++],"*"); if(pr>MP_FMT_MAX) mp_raise_t(E_ValueError,"precision too big"); sp.prec= pr<0 ? 0 : (int)pr; i++; }     /* (a negative one: 0, as CPython) */
+            else while(i<n && s[i]>='0' && s[i]<='9'){ sp.prec=sp.prec*10+(s[i++]-'0'); if(sp.prec>MP_FMT_MAX) mp_raise_t(E_ValueError,"precision too big"); } }
         while(i<n && strchr("hlL",s[i])) i++;
         if(i>=n) mp_raise_t(E_ValueError,"incomplete format");
         int c=s[i];
@@ -225,9 +238,7 @@ Value mp_percent_format(Value fmtv, Value args){
             case 'd': case 'i': case 'u':{
                 if(arg.k==V_FLOAT) arg=v_int((int64_t)arg.u.f);
                 if(!IS_INTLIKE(arg)){ if(TYPE(arg)->flags&TF_DUNDERS) arg=v_int(mp_index(arg,"%d")); else mp_raise_t(E_TypeError,"%%%c format: a real number is required, not %s",c,mp_type_name(arg)); }
-                Spec s2=sp; s2.type='d';
-                if(sp.prec>0){ char d[64]; snprintf(d,sizeof d,"%0*lld",sp.prec,(long long)(arg.u.i<0?-arg.u.i:arg.u.i)); char h[4]={0}; if(arg.u.i<0) h[0]='-'; else if(sp.sign) h[0]=(char)sp.sign; pad(&out,&s2,h,d,(int64_t)strlen(d),1); }
-                else fmt_int(&out,arg.u.i,&s2);
+                Spec s2=sp; s2.type='d'; fmt_int(&out,arg.u.i,&s2);     /* (a precision: at least that many digits) */
                 break; }
             case 'x': case 'X': case 'o':{
                 if(!IS_INTLIKE(arg)) mp_raise_t(E_TypeError,"%%%c format: an integer is required, not %s",c,mp_type_name(arg));

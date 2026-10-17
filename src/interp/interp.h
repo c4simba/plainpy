@@ -262,6 +262,7 @@ Value   mp_dict(void);
 Value   mp_set(Type *t);
 int     mp_dict_get(DictObj *d, Value key, Value *out);
 void    mp_dict_set(DictObj *d, Value key, Value val);
+void    mp_dict_reserve(DictObj *d, int64_t n);           /* room for n entries */
 int     mp_dict_del(DictObj *d, Value key);
 int     mp_dict_get_s(DictObj *d, const char *key, Value *out);
 void    mp_dict_set_s(DictObj *d, const char *key, Value val);

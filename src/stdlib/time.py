@@ -39,8 +39,14 @@ def _days_from_civil(y: int, m: int, d: int) -> int:
     return era * 146097 + doe - 719468
 
 
+_cday: list[tuple[int, tuple[int, int, int]]] = [(0, (1970, 1, 1))]      # (_civil's last day and its date)
+
+
 def _civil(days: int) -> tuple[int, int, int]:
     """(year, month, day) of a day counted from 1970-01-01."""
+    c = _cday[0]
+    if c[0] == days:                            # (the calls of a day come in runs)
+        return c[1]
     z = days + 719468
     era = z // 146097
     doe = z - era * 146097
@@ -52,7 +58,9 @@ def _civil(days: int) -> tuple[int, int, int]:
     m = mp + 3 if mp < 10 else mp - 9
     if m <= 2:
         y += 1
-    return (y, m, d)
+    r = (y, m, d)
+    _cday[0] = (days, r)
+    return r
 
 
 def _leap(y: int) -> bool:
@@ -278,7 +286,8 @@ class struct_time:
         self.tm_zone: str | None = None
         self.tm_gmtoff: int | None = None
         if not sys._compiled:
-            self._rest(seq)
+            if len(seq) != 9:
+                self._rest(seq)
 
     if not sys._compiled:
         def _rest(self, seq):
@@ -388,10 +397,23 @@ def _utc(t: int) -> struct_time:
     return _make(t, 0, 0, "UTC")
 
 
+_lsec: list[tuple[int, struct_time]] = []       # (localtime's last (seconds, struct_time): one object for a second's
+                                                #  calls - CPython's cannot be changed, so no program sees it shared)
+
+
 def _local(t: int) -> struct_time:
     """localtime of whole seconds."""
+    if _lsec:
+        c = _lsec[0]
+        if c[0] == t:
+            return c[1]
     off, dst, zone = _info(t)
-    return _make(t, off, dst, zone)
+    st = _make(t, off, dst, zone)
+    if _lsec:
+        _lsec[0] = (t, st)
+    else:
+        _lsec.append((t, st))
+    return st
 
 
 def gmtime(secs=None) -> struct_time:
@@ -407,6 +429,9 @@ def localtime(secs=None) -> struct_time:
     if secs is None:
         return _local(_clock(0)[0])
     else:
+        if not sys._compiled:
+            if type(secs) is int:               # (the interpreter: a whole number of seconds as it is)
+                return _local(secs)
         return _local(_whole(secs))
 
 
@@ -616,16 +641,18 @@ def _field(c: str, t: struct_time) -> str:
     return "%" + c
 
 
-_last: tuple[str, list[str]] = ("", [""])         # (the format _strftime had last, its _pieces)
+_last: tuple[str, list[str], list[int]] = ("", [""], [])     # (the format _strftime had last, its _pieces, their codes)
 
 
-def _pieces(format: str) -> list[str]:
-    """format's text and directives' letters taking turns: [text, letter, text, ..., letter, text]."""
+def _pieces(format: str) -> tuple[str, list[str], list[int]]:
+    """(format, its text and directives' letters taking turns: [text, letter, text, ..., letter, text], the letters'
+    codes: ord())."""
     global _last
     last = _last
     if last[0] == format:                       # (a program's format is mostly the same one)
-        return last[1]
+        return last
     p: list[str] = []
+    codes: list[int] = []
     i = 0
     n = len(format)
     while True:
@@ -635,22 +662,49 @@ def _pieces(format: str) -> list[str]:
             break
         p.append(format[i:j])
         p.append(format[j + 1])
+        codes.append(ord(format[j + 1]))
         i = j + 2
-    _last = (format, p)
-    return p
+    last = (format, p, codes)
+    _last = last
+    return last
 
 
 def _strftime(format: str, t: struct_time) -> str:
-    p = _pieces(format)
-    out: list[str] = []
-    n = len(p) - 1
-    for k in range(0, n, 2):
-        if p[k]:
-            out.append(p[k])
-        out.append(_field(p[k + 1], t))
-    if p[n]:
-        out.append(p[n])
-    return "".join(out)
+    if not sys._compiled:
+        r = _ppy_time.strftime(format, t)      # (the usual directives; None: the others are here)
+        if r is not None:
+            return r
+    pc = _pieces(format)
+    p = pc[1]
+    codes = pc[2]
+    out = ""
+    i = 0
+    for c in codes:                             # (the usual ones here, by their codes: Y m d H M S)
+        if p[i]:
+            out += p[i]
+        if c == 89:
+            y = t.tm_year
+            out += "0" * (4 - len(str(y))) + str(y) if 0 <= y < 1000 else str(y)
+        elif c == 109:
+            out += _2(t.tm_mon if t.tm_mon != 0 else 1)
+        elif c == 100:
+            out += _2(t.tm_mday if t.tm_mday != 0 else 1)
+        elif c == 72:
+            out += _2(t.tm_hour)
+        elif c == 77:
+            out += _2(t.tm_min)
+        elif c == 83:
+            out += _2(t.tm_sec)
+        else:
+            out += _field(p[i + 1], t)
+        i += 2
+    if p[i]:
+        out += p[i]
+    return out
+
+
+_sflast: list[tuple[str, struct_time, str]] = []     # (strftime's last format, struct_time and text - kept with the
+                                                    #  object, so no other can be at its address; it is not changed)
 
 
 def strftime(format: str, t=None) -> str:
@@ -662,6 +716,23 @@ def strftime(format: str, t=None) -> str:
             if not isinstance(t, struct_time):
                 t = struct_time(t)
         st = t
+    if _sflast:
+        c = _sflast[0]
+        if c[1] is st and c[0] == format:     # (the same second's localtime(), as a log's lines have it)
+            return c[2]
+    r = _strftime_checked(format, st)
+    if _sflast:
+        _sflast[0] = (format, st, r)
+    else:
+        _sflast.append((format, st, r))
+    return r
+
+
+def _strftime_checked(format: str, st: struct_time) -> str:
+    if not sys._compiled:
+        r = _ppy_time.strftime(format, st)     # (it takes only fields _check() lets through)
+        if r is not None:
+            return r
     _check(st)
     return _strftime(format, st)
 
@@ -1294,28 +1365,43 @@ def _load() -> _Zone:
 
 
 _zone: list[_Zone] = []
+_EARLY = -2147483648                            # (_ilast's "always": a compiled program's int has 32 bits - a time
+_LATE = 2147483647                              #  beyond these is only not kept)
+_NOTHING: tuple[int, int, tuple[int, int, str]] = (1, 0, (0, 0, "UTC"))
+_ilast: list[tuple[int, int, tuple[int, int, str]]] = [_NOTHING]     # (_info's last answer, the times [lo, hi) it holds for)
 
 
 def _info(t: int) -> tuple[int, int, str]:
     """(UTC offset, DST flag, zone name) of local time at time t (seconds since 1970 UTC)."""
+    c = _ilast[0]
+    if c[0] <= t < c[1]:
+        return c[2]
     if not _zone:
         _zone.append(_load())
     z = _zone[0]
     n = len(z.trans)
     if n == 0 or t >= z.trans[n - 1]:
         if z.rules:
-            return _rule_info(z.rules[0], t)
+            r = z.rules[0]
+            v = _rule_info(r, t)
+            if r.dst:
+                _ilast[0] = (t, t + 1, v)       # (the rule's changes not worked out: this second)
+            else:
+                _ilast[0] = (z.trans[n - 1] if n > 0 else _EARLY, _LATE, v)
+            return v
         if n == 0:
-            if not z.off:
-                return (0, 0, "UTC")
-            return _zone_info(z, 0)
+            v = (0, 0, "UTC") if not z.off else _zone_info(z, 0)
+            _ilast[0] = (_EARLY, _LATE, v)
+            return v
     if t < z.trans[0]:
         k = 0
         for j in range(len(z.off)):
             if not z.isdst[j]:
                 k = j
                 break
-        return _zone_info(z, k)
+        v = _zone_info(z, k)
+        _ilast[0] = (_EARLY, z.trans[0], v)
+        return v
     lo = 0
     hi = n
     while lo < hi:
@@ -1324,7 +1410,9 @@ def _info(t: int) -> tuple[int, int, str]:
             lo = mid + 1
         else:
             hi = mid
-    return _zone_info(z, z.idx[lo - 1])
+    v = _zone_info(z, z.idx[lo - 1])
+    _ilast[0] = (z.trans[lo - 1], z.trans[lo] if lo < n else _LATE, v)
+    return v
 
 
 def _zone_info(z: _Zone, k: int) -> tuple[int, int, str]:
@@ -1390,6 +1478,30 @@ def tzset() -> None:
     """Read the TZ variable again."""
     del _zone[:]
     del _zinfo[:]
+    _ilast[0] = _NOTHING
+    del _lsec[:]
+    del _sflast[:]
+
+
+if not sys._compiled:                   # (the interpreter: the most used in C, _ppy_time - a compiled program's are its own)
+    import _ppy_time
+    _civil = _ppy_time.civil
+    _ppy_time.set_struct(struct_time)
+    _ppy_time._struct = struct_time     # (kept alive where the collector sees it)
+    _make = _ppy_time.make
+
+    if sys.platform != "kolibrios":     # (KolibriOS's clocks: the functions above)
+        _clock = _ppy_time.clock
+        time = _ppy_time.time
+        time_ns = _ppy_time.time_ns
+        monotonic = _ppy_time.monotonic
+        monotonic_ns = _ppy_time.monotonic_ns
+        perf_counter = _ppy_time.perf_counter
+        perf_counter_ns = _ppy_time.perf_counter_ns
+        process_time = _ppy_time.process_time
+        process_time_ns = _ppy_time.process_time_ns
+        thread_time = _ppy_time.thread_time
+        thread_time_ns = _ppy_time.thread_time_ns
 
 
 if not sys._compiled:                   # (CPython's are C functions: Formatter.converter = time.gmtime is not a method)

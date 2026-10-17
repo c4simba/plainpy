@@ -16,6 +16,20 @@ def log(s: str) -> None:
     f.close()
 
 
+if not sys._compiled:
+    def log_cpython_cert(cert):
+        """The interpreter's getpeercert() is CPython's (tuples): logged as a compiled program's text."""
+        short = {"commonName": "CN", "organizationName": "O", "countryName": "C"}
+        for k in sorted(cert):
+            v = cert[k]
+            if k == "issuer" or k == "subject":
+                v = ",".join(short.get(n, n) + "=" + x for rdn in reversed(v) for n, x in rdn)
+            elif k == "subjectAltName":
+                v = ", ".join(n + ":" + x for n, x in v)
+            if k != "serialNumber":
+                log(k + ": " + str(v))
+
+
 f = open(HERE + "port.txt", "r")
 port = int(f.read().strip())
 f.close()
@@ -38,9 +52,12 @@ s.sendall(b"hello over tls")
 log("echo: " + str(s.recv(100)))
 cert = s.getpeercert()
 if cert is not None:
-    for k in sorted(cert):
-        if k != "serialNumber":
-            log(k + ": " + cert[k])
+    if sys._compiled:                        # (a compiled program's: the values as text)
+        for k in sorted(cert):
+            if k != "serialNumber":
+                log(k + ": " + cert[k])
+    else:
+        log_cpython_cert(cert)
 der = s.getpeercert_der()
 if der is not None:
     log("der: " + str(len(der)) + " bytes, " + der[:4].hex())

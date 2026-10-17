@@ -59,6 +59,7 @@ Value ti_sleep(int argc, Value *argv, TupleObj *kw);
 
 /* ---- json.c: json */
 Value make_json(void);
+Value make_ppy_time(void);
 
 /* ---- thread.c: threads */
 Value make__thread(void);

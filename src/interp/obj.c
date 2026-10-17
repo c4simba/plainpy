@@ -619,6 +619,9 @@ int mp_dict_get(DictObj *d, Value key, Value *out){
     if(out) *out=d->ent[ix_get(d,(uint64_t)slot)].val;
     return 1;
 }
+void mp_dict_reserve(DictObj *d, int64_t n){                /* room for n entries at once (an object's fields) */
+    if(!d->idx || d->cap<n+1 || n*3>d->isize*2) dict_rebuild(d,n);
+}
 void mp_dict_set(DictObj *d, Value key, Value val){
     uint64_t h=hash_as(key,"dict key"); int found;
     if(!d->idx) dict_rebuild(d,1);

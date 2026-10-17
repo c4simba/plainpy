@@ -36,6 +36,13 @@ int parse_spec(const char *s, int n, Spec *sp){
     return i;
 }
 static void src_load(F *f, ArgSrc *a, int as_float){ fmt_arg(f,a->e,a->tt,a->tslot,a->idx,as_float); }
+/* "%.5d": at least that many digits, zeros after the sign (the mark of the number is on the stack) */
+static void int_prec(F *f, int prec, int ps){
+    int l=new_label();
+    E(f,"pop eax"); if(ps) E(f,"mov ecx,[ebp%+d]",ps); else E(f,"mov ecx,%d",prec);
+    E(f,"mov edx,[rt_sb_buf]"); E(f,"cmp byte [edx+eax],'-'"); E(f,"jne L%d",l); E(f,"inc ecx"); LBL(f,l);
+    E(f,"mov edx,0x3004"); CALLRT(f,"rt_sb_pad");
+}
 /* Append one formatted value. pystyle: Python's defaults (strings left-aligned). */
 void emit_field(F *f, Spec *sp, Ty *t, ArgSrc *src, int repr, int pystyle, int line){
     t=ty_find(t);
@@ -57,17 +64,26 @@ void emit_field(F *f, Spec *sp, Ty *t, ArgSrc *src, int repr, int pystyle, int l
         case 's': case 'r':
             if(prec>=0||ps) E(f,"push dword [rt_sb_len]");
             src_load(f,src,0); gen_fmt(f,t,repr||ty=='r');
-            if(prec>=0||ps){ E(f,"pop eax"); if(ps) E(f,"mov edx,[ebp%+d]",ps); else E(f,"mov edx,%d",prec); CALLRT(f,"rt_sb_trunc"); }       /* "%.3s": the first 3 characters */
+            if(prec>=0||ps){ E(f,"pop eax"); if(ps){ int l=new_label(); E(f,"mov edx,[ebp%+d]",ps); E(f,"test edx,edx"); E(f,"jns L%d",l); E(f,"xor edx,edx"); LBL(f,l); } else E(f,"mov edx,%d",prec);
+                CALLRT(f,"rt_sb_trunc"); }                                                                  /* "%.3s": the first 3 characters (a negative precision: 0) */
             break;
         case 'd': case 'i': case 'u':
+            if(pystyle && (prec>=0||ps)) cg_fail(line,"Precision not allowed in integer format specifier");
             src_load(f,src,0); if(is_flt(t)) CALLRT(f,"rt_ftoi"); else if(!is_lng(t)) widen(f,0);
-            CALLRT(f,"rt_sb_int"); break;
+            if(prec>=0||ps) E(f,"push dword [rt_sb_len]");
+            CALLRT(f,"rt_sb_int");
+            if(prec>=0||ps) int_prec(f,prec,ps);
+            break;
         case 'x': case 'X': case 'o': case 'b':{
+            if(pystyle && (prec>=0||ps)) cg_fail(line,"Precision not allowed in integer format specifier");
             src_load(f,src,0); if(is_flt(t)) CALLRT(f,"rt_ftoi"); else if(!is_lng(t)) widen(f,0);
             if(sp->alt){ int l=new_label(); E(f,"test edx,edx"); E(f,"jns L%d",l); E(f,"push edx"); E(f,"push eax"); E(f,"mov al,'-'"); CALLRT(f,"rt_sb_char"); E(f,"pop eax"); E(f,"pop edx");
                 E(f,"neg eax"); E(f,"adc edx,0"); E(f,"neg edx"); LBL(f,l);
                 E(f,"push edx"); E(f,"push eax"); E(f,"mov al,'0'"); CALLRT(f,"rt_sb_char"); E(f,"mov al,'%c'",ty=='o'?'o':ty=='b'?'b':ty); CALLRT(f,"rt_sb_char"); E(f,"pop eax"); E(f,"pop edx"); }
-            E(f,"mov ecx,%d",(ty=='o'?8:ty=='b'?2:16)|(ty=='X'?0x100:0)); CALLRT(f,"rt_sb_radix"); break; }
+            if(prec>=0||ps) E(f,"push dword [rt_sb_len]");            /* (after "0x": the zeros go behind it) */
+            E(f,"mov ecx,%d",(ty=='o'?8:ty=='b'?2:16)|(ty=='X'?0x100:0)); CALLRT(f,"rt_sb_radix");
+            if(prec>=0||ps) int_prec(f,prec,ps);
+            break; }
         case 'f': case 'F': case '%':
             src_load(f,src,1);
             if(ty=='%'){ E(f,"push 100"); E(f,"fimul dword [esp]"); E(f,"add esp,4"); }
@@ -88,7 +104,9 @@ void emit_field(F *f, Spec *sp, Ty *t, ArgSrc *src, int repr, int pystyle, int l
         unsigned mode= align=='<' ? 1 : align=='^' ? 2 : 0, fill=(unsigned)sp->fill;
         if(sp->zero && !sp->align && num){ mode|=4; fill='0'; }
         if(align=='=' && num) mode|=4;
-        E(f,"pop eax"); if(sp->wslot) E(f,"mov ecx,[ebp%+d]",sp->wslot); else E(f,"mov ecx,%d",sp->width); E(f,"mov edx,0x%x",mode|fill<<8); CALLRT(f,"rt_sb_pad");
+        E(f,"pop eax"); if(sp->wslot) E(f,"mov ecx,[ebp%+d]",sp->wslot); else E(f,"mov ecx,%d",sp->width); E(f,"mov edx,0x%x",mode|fill<<8);
+        if(sp->wslot){ int l=new_label(); E(f,"test ecx,ecx"); E(f,"jns L%d",l); E(f,"neg ecx"); E(f,"mov edx,0x2001"); LBL(f,l); }   /* "%*d" % (-6, n): left, with spaces */
+        CALLRT(f,"rt_sb_pad");
     }
 }
 void gen_format_body(F *f, Expr *e){
@@ -117,7 +135,17 @@ void gen_format_body(F *f, Expr *e){
             int j=i;                                            /* printf: flags, width, precision, then the type letter */
             while(j<len && !((fmt[j]>='a'&&fmt[j]<='z')||(fmt[j]>='A'&&fmt[j]<='Z')||fmt[j]=='%')) j++;
             if(j>=len) cg_fail(e->line,"incomplete format");
-            parse_spec(fmt+i,j+1-i,&sp); i=j+1;
+            char spec[64]; int sl=j+1-i, nstar=0;
+            if(sl>=(int)sizeof spec) cg_fail(e->line,"format spec too long");
+            for(int k=0;k<sl;k++) spec[k]= fmt[i+k]=='*' ? (nstar++, '\001') : fmt[i+k];   /* "%*.*f": the width / precision are arguments */
+            parse_spec(spec,sl,&sp); i=j+1;
+            { int *slots[2]; int ns=0; if(sp.wslot<0) slots[ns++]=&sp.wslot; if(sp.pslot<0) slots[ns++]=&sp.pslot;
+              if(ns!=nstar) cg_fail(e->line,"'*' in a format: only as the width or the precision");
+              for(int k=0;k<ns;k++){                              /* (taken before the value, as CPython does) */
+                  if(ai>=nargs) cg_fail(e->line,"not enough arguments for the format string");
+                  int ix=ai++; Ty *st=ty_find(tslot?tt->elems[ix]:TY(args[ix]));
+                  if(st->k!=TY_INT && st->k!=TY_BOOL) cg_fail(e->line,"* wants int");
+                  *slots[k]=frame_slot(f,4); ArgSrc ss={tslot?NULL:args[ix],tt,tslot,ix}; src_load(f,&ss,0); to_i32(f,st); E(f,"mov [ebp%+d],eax",*slots[k]); } }
         }
         if(ai>=nargs) cg_fail(e->line,"not enough arguments for the format string");
         int ix=ai++; ArgSrc src={tslot?NULL:args[ix],tt,tslot,ix};

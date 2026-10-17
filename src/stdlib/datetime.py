@@ -10,6 +10,10 @@ import sys
 import time as _time
 from _ppy_typing import TypeVar
 
+if not sys._compiled:
+    import _ppy_time                    # (the interpreter's C: a struct_time, a datetime at once; strftime)
+    _FIELDS = ("_year", "_month", "_day", "_hour", "_minute", "_second", "_microsecond", "_tzinfo", "_fold")
+
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 
@@ -478,6 +482,8 @@ def _wrap_strftime(format: str, year: int, microsecond: int, off: timedelta | No
 
 
 def _struct(y: int, m: int, d: int, hh: int, mm: int, ss: int, dst: int) -> _time.struct_time:
+    if not sys._compiled:
+        return _ppy_time.fields(_time.struct_time, y, m, d, hh, mm, ss, dst)
     wday = (_ymd2ord(y, m, d) + 6) % 7
     return _time.struct_time((y, m, d, hh, mm, ss, wday, _days_before_month(y, m) + d, dst))
 
@@ -644,6 +650,10 @@ class date(_YMD):
 
     def strftime(self, format: str) -> str:
         """The date as format says (time.strftime's directives; the time of day is 0)."""
+        if not sys._compiled:
+            r = _ppy_time.strftime_ymd(format, self._year, self._month, self._day, 0, 0, 0, 0)
+            if r is not None:
+                return r
         return _wrap_strftime(format, self._year, 0, None, None, self.timetuple())
 
     def __format__(self, fmt: str) -> str:
@@ -1221,10 +1231,17 @@ class datetime(_DateParent):
         days = lt // 86400
         rem = lt - days * 86400
         y, m, d = _time._civil(days)
-        result = datetime(y, m, d, rem // 3600, rem // 60 % 60, rem % 60, us, tz)
+        result = datetime._trusted(y, m, d, rem // 3600, rem // 60 % 60, rem % 60, us, tz)
         if tz is not None:
             result = tz.fromutc(result)
         return result
+
+    @staticmethod
+    def _trusted(y: int, m: int, d: int, hh: int, mm: int, ss: int, us: int, tz: "tzinfo | None") -> "datetime":
+        """A datetime of fields worked out here (in range): the interpreter's without the checks."""
+        if not sys._compiled:
+            return _ppy_time.obj(datetime, _FIELDS, y, m, d, hh, mm, ss, us, tz, 0)
+        return datetime(y, m, d, hh, mm, ss, us, tz)
 
     @staticmethod
     def fromtimestamp(t: float, tz: "tzinfo | None" = None) -> "datetime":
@@ -1240,6 +1257,10 @@ class datetime(_DateParent):
     def now(tz: "tzinfo | None" = None) -> "datetime":
         """The current local datetime (naive), or the time in tz."""
         ns = _time.time_ns()                     # (as CPython: the microseconds rounded down)
+        if not sys._compiled:
+            if tz is None:
+                secs = ns // 1000000000
+                return _ppy_time.datetime_at(datetime, _FIELDS, secs, ns // 1000 % 1000000, _time._info(secs)[0])
         return datetime._from_secs(ns // 1000000000, ns // 1000 % 1000000, tz is not None, tz)
 
     @staticmethod
@@ -1423,6 +1444,12 @@ class datetime(_DateParent):
 
     def strftime(self, format: str) -> str:
         """The datetime as format says (time.strftime's directives, %f microseconds, %z, %:z, %Z)."""
+        if not sys._compiled:
+            if self._tzinfo is None:
+                r = _ppy_time.strftime_ymd(format, self._year, self._month, self._day, self._hour, self._minute, self._second,
+                                           self._microsecond)
+                if r is not None:
+                    return r
         return _wrap_strftime(format, self._year, self._microsecond, self.utcoffset(), self.tzname(),
                               self.timetuple())
 
