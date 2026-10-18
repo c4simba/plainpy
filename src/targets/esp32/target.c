@@ -54,7 +54,8 @@ static int build(AotBuild *b){
     for(const char *p=last;*p && k<sizeof name-1;p++) name[k++]=(char)((*p>='a'&&*p<='z')||(*p>='A'&&*p<='Z')||(*p>='0'&&*p<='9')||*p=='_' ? *p : '_');
     name[k]=0; if(!k || (name[0]>='0'&&name[0]<='9')){ memmove(name+1,name,k+1); name[0]='p'; }
     char *dir=aot_concat(b->base,"/"), *mdir=aot_concat(dir,"main/");
-    { char *q=aot_tool_args("-p {in}",mdir,mdir); int rc=aot_run_tool("mkdir",q,"-o",b->verbose); free(q); if(rc) return 1; }
+    if(b->verbose) printf("mkdir -p %s\n",mdir);
+    if(ppy_fs_make_dirs(mdir)){ fprintf(stderr,"plainpy: cannot make the folder %s\n",mdir); return 1; }
     char path[2048];
     snprintf(path,sizeof path,"%sCMakeLists.txt",dir);       if(write_filled(b,path,"esp32_cmake",name,chip)) return 1;
     snprintf(path,sizeof path,"%ssdkconfig.defaults",dir);   if(write_filled(b,path,"esp32_sdkconfig",name,chip)) return 1;

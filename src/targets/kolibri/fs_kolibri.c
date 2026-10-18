@@ -180,3 +180,5 @@ int ppy_fs_backend_write_file(const char *normalized_path,const char *data,size_
 /* Subfunction 8: delete a file. */
 int ppy_fs_backend_remove(const char *normalized_path){ return kos_f70(8, 0, 0, 0, NULL, normalized_path); }
 int ppy_fs_backend_exists(const char *normalized_path){ int lo, hi; return kos_file_size(normalized_path, &lo, &hi) == 0; }
+/* Subfunction 9: create a folder (0 also when there is one). */
+int ppy_fs_backend_mkdir(const char *normalized_path){ return kos_f70(9, 0, 0, 0, NULL, normalized_path) == 0 ? 0 : -1; }

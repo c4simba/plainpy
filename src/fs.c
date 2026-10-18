@@ -334,3 +334,15 @@ int ppy_fs_write_file(const char *path,const char *data,size_t len,char **error_
 }
 int ppy_fs_remove(const char *path){ char *norm=ppy_fs_normalize_path(path); int rc=ppy_fs_backend_remove(norm); free(norm); return rc; }
 int ppy_fs_exists(const char *path){ char *norm=ppy_fs_normalize_path(path); int rc=ppy_fs_backend_exists(norm); free(norm); return rc; }
+int ppy_fs_make_dirs(const char *path){
+    char *norm=ppy_fs_normalize_path(path);
+    size_t n=strlen(norm); int rc=0;
+    for(size_t i=1;i<=n;i++){                             /* each folder of the path in turn ("/a", "/a/b", ...) */
+        if(i<n && !ppy_fs_is_sep(norm[i])) continue;
+        char c=norm[i]; norm[i]=0;
+        rc=ppy_fs_backend_mkdir(norm);
+        norm[i]=c;
+    }
+    free(norm);
+    return rc;
+}

@@ -49,12 +49,15 @@ const char *ppy_fs_backend_name(void);
 int         ppy_fs_write_file(const char *path, const char *data, size_t len, char **error_message);
 int         ppy_fs_remove(const char *path);
 int         ppy_fs_exists(const char *path);
+/* path made a folder with the folders it is in (mkdir -p): 0 when it is one now. */
+int         ppy_fs_make_dirs(const char *path);
 
 /* Backend contract (exactly one backend .o is linked per build). */
 char       *ppy_fs_backend_read_file(const char *normalized_path, char **error_message);
 int         ppy_fs_backend_write_file(const char *normalized_path, const char *data, size_t len, char **error_message);
 int         ppy_fs_backend_remove(const char *normalized_path);
 int         ppy_fs_backend_exists(const char *normalized_path);
+int         ppy_fs_backend_mkdir(const char *normalized_path);     /* 0: made, or a folder already */
 
 /* Shared ANSI-stdio reader; used by the host backend. */
 char       *ppy_fs_read_file_stdio_path(const char *path, char **error_message);

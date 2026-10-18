@@ -84,6 +84,7 @@ int aot_run_tool(const char *program, const char *args, const char *option, int 
 }
 int aot_write_file(const char *path, const char *data, size_t n, int verbose){
     char *err=NULL;
+    { char *dir=ppy_fs_dirname(path); if(strcmp(dir,".")) ppy_fs_make_dirs(dir); free(dir); }   /* (-o build/esp32/blink: build/esp32 made) */
     if(ppy_fs_write_file(path,data,n,&err)){ fprintf(stderr,"plainpy: %s\n",err?err:"cannot write a file"); free(err); return 1; }
     if(verbose) printf("wrote %s\n",path);
     return 0;

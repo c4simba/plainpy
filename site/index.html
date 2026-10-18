@@ -406,6 +406,7 @@ footer p { margin: 0 0 6px; max-width: 46em; }
         <a class="pill" href="https://github.com/c4simba/plainpy/releases/latest">Releases <span class="release" hidden></span></a>
         <span class="pill">MIT</span>
         <span class="pill">Linux · macOS · KolibriOS · ESP32</span>
+        <span class="pill">HTTPS · requests</span>
       </div>
       <h1>Python,<br>plain<span class="dot">.</span></h1>
       <p class="lead"><strong>plainpy</strong> runs Python&nbsp;3.14 programs and compiles typed ones into small native executables, or into C for microcontrollers. One C codebase written from scratch, with <mark>nothing to install but itself</mark>.</p>
@@ -551,7 +552,22 @@ Hello, world!</pre>
       <article class="feature">
         <div class="n">09</div>
         <h3>At home on KolibriOS</h3>
-        <p>The interpreter, the compiler and the programs it makes run on KolibriOS, an operating system written in assembly. There it compiles with the system’s own fasm.</p>
+        <p>The interpreter, the compiler and the programs it makes run on KolibriOS, an operating system written in assembly. There it compiles with the system’s own fasm, and talks HTTPS through an mbedTLS of its own.</p>
+      </article>
+      <article class="feature">
+        <div class="n">10</div>
+        <h3>HTTPS, both ways</h3>
+        <p><code>ssl</code> is CPython’s module over the system’s OpenSSL&nbsp;3, loaded only when a program first uses it. <code>http.client</code>, <code>urllib.request</code> and TLS servers work interpreted and compiled, certificates and host names checked.</p>
+      </article>
+      <article class="feature">
+        <div class="n">11</div>
+        <h3>requests, compiled</h3>
+        <p><code>import requests</code>: sessions, cookies, auth, redirects, JSON, multipart files, gzip, streaming and keep-alive. The same program prints what CPython with the real requests prints, interpreted, compiled or on KolibriOS.</p>
+      </article>
+      <article class="feature">
+        <div class="n">12</div>
+        <h3>Small in memory</h3>
+        <p>Types are made when first used, objects are compact and programs can ship as <code>.ppyc</code> bytecode without their sources. <code>print(1)</code> takes 91&nbsp;KiB; <code>json</code>, <code>re</code> and <code>datetime</code> together 2.4&nbsp;MB, from 28.7.</p>
       </article>
     </div>
   </div>
