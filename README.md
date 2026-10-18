@@ -876,16 +876,16 @@ and times them both ways (the best of three runs; their outputs must match):
 
 | benchmark | what it does | CPython 3.14 | compiled | |
 |---|---|---|---|---|
-| `loops` | Collatz sequences: while, `%`, `//`, `*` on ints | 3.54 s | 0.23 s | 15.3x faster |
-| `power` | modular exponentiation by squaring, `i ** 3`, `x ** 1.5` | 2.87 s | 0.92 s | 3.1x faster |
-| `floats` | the Mandelbrot set, an integral of `sin(x) * sqrt(x)` | 1.99 s | 0.44 s | 4.6x faster |
-| `primes` | a sieve over a list, the gaps between primes in a dict | 2.98 s | 1.18 s | 2.5x faster |
-| `listcomp` | comprehensions: squares, a filter, tuples taken apart, strings, nested and flattening ones | 2.50 s | 0.74 s | 3.4x faster |
-| `dicts` | int and str keys: filling, `in`, `[]`, `get`, counting, `items()`, `values()`, `del`, a comprehension | 2.27 s | 1.30 s | 1.7x faster |
-| `trees` | trees whose nodes know their parent and kids: built, walked both ways, dropped (garbage cycles) | 1.73 s | 1.16 s | 1.5x faster |
-| `clock` | `time.time()`, `monotonic()`, `perf_counter()`; `datetime.now()`, `localtime()`, `strftime()` | 2.25 s | 2.59 s | 1.2x slower |
+| `loops` | Collatz sequences: while, `%`, `//`, `*` on ints | 3.50 s | 0.22 s | 15.7x faster |
+| `power` | modular exponentiation by squaring, `i ** 3`, `x ** 1.5` | 2.84 s | 0.92 s | 3.1x faster |
+| `floats` | the Mandelbrot set, an integral of `sin(x) * sqrt(x)` | 2.01 s | 0.42 s | 4.8x faster |
+| `primes` | a sieve over a list, the gaps between primes in a dict | 2.87 s | 1.18 s | 2.4x faster |
+| `listcomp` | comprehensions: squares, a filter, tuples taken apart, strings, nested and flattening ones | 2.56 s | 0.74 s | 3.5x faster |
+| `dicts` | int and str keys: filling, `in`, `[]`, `get`, counting, `items()`, `values()`, `del`, a comprehension | 2.29 s | 1.28 s | 1.8x faster |
+| `trees` | trees whose nodes know their parent and kids: built, walked both ways, dropped (garbage cycles) | 1.69 s | 1.15 s | 1.5x faster |
+| `clock` | `time.time()`, `monotonic()`, `perf_counter()`; `datetime.now()`, `localtime()`, `strftime()` | 2.10 s | 2.10 s | the same |
 
-(an Apple M-series Mac, the macos target, 2026-10-13.) `loops` owes much to
+(an Apple M-series Mac, the macos target, 2026-10-18.) `loops` owes much to
 `n % 2` and `n // 2` being a mask and a shift. `dicts` took 195 s before
 `del` left a hole instead of moving every later entry down and making the
 index again (it was the 12 500 deletions of each round); in `trees` the cycle
@@ -905,8 +905,9 @@ is one C function: the same operation costs about twice as much once
 `datetime` is imported as in a small program. On x86 (Linux, KolibriOS) the
 same programs run as the i386 code itself. `--interp` adds plainpy's
 interpreter: as fast as CPython on `listcomp`, 1.1 to 1.9 times its time on
-the other computing ones, 4.9 times on `trees` (an attribute is a dict
-lookup) and 14 times on `clock`. It got there by `for a, b in enumerate(xs)`
+the other computing ones, 3.4 times on `trees` (an attribute is a dict
+lookup) and 1.7 times on `clock` (the interpreter's clocks, `struct_time` and
+`strftime` are C: `src/interp/modules/clock.c`). It got there by `for a, b in enumerate(xs)`
 (and `zip(xs, ys)`, `d.items()`) not making a tuple per round, small
 objects' memory reused per size class, one walk of the heap per collection
 with the objects sorted by a radix sort instead of `qsort`, and the eval
