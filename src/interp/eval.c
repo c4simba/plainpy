@@ -46,6 +46,110 @@ static inline __attribute__((always_inline)) int fast_arith(int op, Value a, Val
     }
     return 0;
 }
+/* a < b ... of two ints or two floats (an int with a float: exactly, the general way); 0: not done */
+static inline __attribute__((always_inline)) int fast_cmp(int op, Value a, Value b, int *r){
+    if(a.k==V_INT && b.k==V_INT){ int64_t x=a.u.i, y=b.u.i;
+        switch(op){ case OP_Lt: *r=x<y; return 1; case OP_LtE: *r=x<=y; return 1; case OP_Gt: *r=x>y; return 1; case OP_GtE: *r=x>=y; return 1;
+                    case OP_Eq: *r=x==y; return 1; case OP_NotEq: *r=x!=y; return 1; default: return 0; } }
+    if(a.k==V_FLOAT && b.k==V_FLOAT){ double x=a.u.f, y=b.u.f;
+        switch(op){ case OP_Lt: *r=x<y; return 1; case OP_LtE: *r=x<=y; return 1; case OP_Gt: *r=x>y; return 1; case OP_GtE: *r=x>=y; return 1;
+                    case OP_Eq: *r=x==y; return 1; case OP_NotEq: *r=x!=y; return 1; default: return 0; } }
+    if(op==OP_Is || op==OP_IsNot){                        /* (as mp_compare) */
+        int same= a.k==b.k && (a.k==V_OBJ ? a.u.o==b.u.o : a.k==V_FLOAT ? a.u.f==b.u.f : a.u.i==b.u.i);
+        *r= op==OP_Is ? same : !same; return 1; }
+    return 0;
+}
+/* A LOAD_FAST's / CONST's value v and the instructions after it, done at once when they are numbers:
+   TOP op v (the next is BINOP, INPLACE, COMPARE), or v op w (the next loads w, the one after is the
+   operator); a comparison's JUMP_IF_FALSE / JUMP_IF_TRUE taken at once, an operation's STORE_FAST
+   too. The fast operations raise nothing and make no objects, so where the instructions are does
+   not matter for a traceback, and a jump into the middle of them just runs them one by one.
+   0: not done - v is pushed the usual way. */
+/* o.name / o.name = v of an instance of a class (no class attribute of that name, no attribute hooks):
+   its dict's; 0: the general way */
+static inline __attribute__((always_inline)) int fast_getattr(Value o, Value nm, Value *r){
+    if(o.k!=V_OBJ) return 0;
+    Type *t=o.u.o->type;
+    if(t->layout!=LY_INSTANCE || !(t->flags&TF_HEAP) || (mp_type_hooks_now(t)&TH_GETATTRIBUTE) || mp_type_lookup(t,nm).k!=V_UNDEF) return 0;
+    DictObj *d=((InstObj*)o.u.o)->dict;
+    return d && mp_dict_get(d,nm,r);
+}
+static inline __attribute__((always_inline)) int fast_setattr(Value o, Value nm, Value v){
+    if(o.k!=V_OBJ) return 0;
+    Type *t=o.u.o->type;
+    if(t->layout!=LY_INSTANCE || !(t->flags&TF_HEAP) || (mp_type_hooks_now(t)&TH_SETATTR) || mp_type_lookup(t,nm).k!=V_UNDEF) return 0;
+    DictObj *d=((InstObj*)o.u.o)->dict;
+    if(!d) return 0;
+    mp_dict_set(d,nm,v); return 1;
+}
+/* f->ip after a STORE_FAST at at-1: a JUMP after it taken at once */
+static inline __attribute__((always_inline)) void stored_at(Frame *f, CodeObj *co, int at);
+/* c[k] (o SUBSCR) / c[k] = TOP (o STORE_SUBSCR) for the two values loaded: a list's or tuple's item
+   by an int in range, a dict's by an int or str key (whose hash raises nothing); a JUMP_IF_* on a
+   bool item at once. at: the instruction after it. 0: not done */
+static inline __attribute__((always_inline)) int fused_subscr(Frame *f, CodeObj *co, Value c, Value k, int o, int at){
+    if(c.k!=V_OBJ) return 0;
+    Type *t=c.u.o->type;
+    if(o==I_SUBSCR){
+        Value r;
+        if(k.k==V_INT && (t==T_list || t==T_tuple)){
+            int64_t n= t==T_list ? AS_LIST(c)->len : AS_TUPLE(c)->len, i=k.u.i; if(i<0) i+=n;
+            if(i<0 || i>=n) return 0;
+            r= t==T_list ? AS_LIST(c)->items[i] : AS_TUPLE(c)->items[i]; }
+        else if(t==T_dict && (k.k==V_INT || (k.k==V_OBJ && k.u.o->type==T_str))){ if(!mp_dict_get(AS_DICT(c),k,&r)) return 0; }
+        else return 0;
+        if(r.k==V_BOOL && at<co->ncode){ uint32_t j=co->code[at]; int jo=(int)(j&0xff);
+            if(jo==I_JUMP_IF_FALSE || jo==I_JUMP_IF_TRUE){ f->ip= (jo==I_JUMP_IF_FALSE ? !r.u.i : r.u.i) ? (int)(j>>8) : at+1; return 1; } }
+        f->stack[f->sp++]=r; f->ip=at; return 1;
+    }
+    Value v=f->stack[f->sp-1];
+    if(t==T_list && k.k==V_INT){ ListObj *l=AS_LIST(c); int64_t i=k.u.i; if(i<0) i+=l->len;
+        if(i<0 || i>=l->len) return 0;
+        l->items[i]=v; }
+    else if(t==T_dict && (k.k==V_INT || (k.k==V_OBJ && k.u.o->type==T_str))) mp_dict_set(AS_DICT(c),k,v);
+    else return 0;
+    f->sp--; f->ip=at; return 1;
+}
+static inline __attribute__((always_inline)) int fused_load(Frame *f, CodeObj *co, Value v){
+    const uint32_t *code=co->code; int ip=f->ip, n=co->ncode, used;
+    if(ip>=n) return 0;
+    uint32_t ins=code[ip]; int o=(int)(ins&0xff);
+    Value a, b;
+    if(o==I_BINOP || o==I_INPLACE || o==I_COMPARE){ a=f->stack[f->sp-1]; b=v; used=1; }
+    else if(o==I_LOAD_FAST || o==I_CONST || o==I_NONE){
+        if(ip+1>=n) return 0;
+        b= o==I_CONST ? co->consts[ins>>8] : o==I_NONE ? v_none() : f->fast[ins>>8];
+        if(b.k==V_UNDEF) return 0;
+        ins=code[ip+1]; o=(int)(ins&0xff);
+        if(o==I_SUBSCR || o==I_STORE_SUBSCR) return fused_subscr(f,co,v,b,o,ip+2);
+        if(o!=I_BINOP && o!=I_INPLACE && o!=I_COMPARE) return 0;
+        a=v; used=2;
+    } else return 0;
+    int at=ip+used; Value r;                              /* (at: the instruction after the operator) */
+    if(o==I_COMPARE){
+        int c; if(!fast_cmp((int)(ins>>8),a,b,&c)) return 0;
+        if(at<n){ uint32_t j=code[at]; int jo=(int)(j&0xff);
+            if(jo==I_JUMP_IF_FALSE || jo==I_JUMP_IF_TRUE){
+                if(used==1) f->sp--;
+                f->ip= (jo==I_JUMP_IF_FALSE ? !c : c) ? (int)(j>>8) : at+1;
+                return 1; } }
+        r=v_bool(c);
+    } else {
+        if(!fast_arith((int)(ins>>8),a,b,&r)) return 0;
+        if(at<n && (code[at]&0xff)==I_STORE_FAST){ if(used==1) f->sp--; f->fast[code[at]>>8]=r; stored_at(f,co,at+1); return 1; }
+    }
+    if(used==1) f->stack[f->sp-1]=r; else f->stack[f->sp++]=r;
+    f->ip=at;
+    return 1;
+}
+/* every 64 loop rounds and calls: a collection when one is due, another thread's turn */
+static int eval_ticks;
+#define TICK() do{ if(++eval_ticks>=64){ eval_ticks=0; mp_gc_maybe(); \
+        if(mp_nthreads>1){ Thread *self_=ts; mp_gil_release(); ppy_thread_yield(); mp_gil_acquire(self_); } } }while(0)
+static inline __attribute__((always_inline)) void stored_at(Frame *f, CodeObj *co, int at){
+    if(at<co->ncode && (co->code[at]&0xff)==I_JUMP){ int to=(int)(co->code[at]>>8); if(to<at){ Thread *ts=mp_ts; TICK(); (void)ts; } f->ip=to; }
+    else f->ip=at;
+}
 static const char *cellname(CodeObj *co, int i){ return i<co->ncells ? co->cellnames[i]->s : co->freenames[i-co->ncells]->s; }
 static Value unpack_list(Value seq, int64_t want, int ex){
     if(IS_TUPLE(seq) || IS_LIST(seq)) return seq;
@@ -176,7 +280,6 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
     if(resume && !throwing && !f->nopush) PUSH(sent);
     f->nopush=0;
     Catch c;
-    int ticks=0;
     volatile int pending_throw=throwing;
   arm:
     mp_catch_push(&c);
@@ -197,12 +300,8 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
         reraise(e);
     }
     if(pending_throw){ pending_throw=0; Value e=sent; mp_raise(e); }
+    TICK();
     for(;;){
-        if(++ticks>=64){
-            ticks=0;
-            mp_gc_maybe();
-            if(mp_nthreads>1){ Thread *self=ts; mp_gil_release(); ppy_thread_yield(); mp_gil_acquire(self); }
-        }
         uint32_t ins=co->code[f->ip++];
         int op=(int)(ins&0xff), arg=(int)(ins>>8);
         switch(op){
@@ -213,10 +312,10 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
             case I_ROT2:{ Value t=TOP(); TOP()=SECOND(); SECOND()=t; break; }
             case I_ROT3:{ Value t=f->stack[f->sp-1]; f->stack[f->sp-1]=f->stack[f->sp-2]; f->stack[f->sp-2]=f->stack[f->sp-3]; f->stack[f->sp-3]=t; break; }
             case I_ROT4:{ Value t=f->stack[f->sp-1]; f->stack[f->sp-1]=f->stack[f->sp-2]; f->stack[f->sp-2]=f->stack[f->sp-3]; f->stack[f->sp-3]=f->stack[f->sp-4]; f->stack[f->sp-4]=t; break; }
-            case I_CONST: PUSH(co->consts[arg]); break;
+            case I_CONST: if(fused_load(f,co,co->consts[arg])) break; PUSH(co->consts[arg]); break;
             case I_NONE: PUSH(v_none()); break;
-            case I_LOAD_FAST:{ Value v=f->fast[arg]; if(v.k==V_UNDEF) unbound_local(co,arg); PUSH(v); break; }
-            case I_STORE_FAST: f->fast[arg]=POP(); break;
+            case I_LOAD_FAST:{ Value v=f->fast[arg]; if(v.k==V_UNDEF) unbound_local(co,arg); if(fused_load(f,co,v)) break; PUSH(v); break; }
+            case I_STORE_FAST: f->fast[arg]=POP(); stored_at(f,co,f->ip); break;
             case I_DEL_FAST: if(f->fast[arg].k==V_UNDEF) unbound_local(co,arg); f->fast[arg]=v_undef(); break;
             case I_LOAD_DEREF:{ Value v=((CellObj*)f->cells[arg].u.o)->v;
                 if(v.k==V_UNDEF){ if(arg<co->ncells) raise_name(E_UnboundLocalError,f,cellname(co,arg),"cannot access local variable '%s' where it is not associated with a value",cellname(co,arg));
@@ -257,8 +356,12 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
                 if(f->locals && f->locals->h.type!=T_dict){ Value v=POP(); mp_setitem(v_obj(f->locals),v_obj(co->names[arg]),v); break; }   /* (its __setitem__) */
                 mp_dict_set(f->locals?f->locals:f->globals,v_obj(co->names[arg]),POP()); break;
             case I_DEL_NAME: if(!mp_dict_del(f->locals?f->locals:f->globals,v_obj(co->names[arg]))) raise_name(E_NameError,f,co->names[arg]->s,"name '%s' is not defined",co->names[arg]->s); break;
-            case I_LOAD_ATTR: TOP()=mp_getattr(TOP(),v_obj(co->names[arg])); break;
-            case I_STORE_ATTR:{ Value o=POP(), v=POP(); mp_setattr(o,v_obj(co->names[arg]),v); break; }
+            case I_LOAD_ATTR:{ Value o=TOP(), nm=v_obj(co->names[arg]), v;
+                if(fast_getattr(o,nm,&v)){ TOP()=v; break; }        /* (an instance's own attribute: its dict's) */
+                TOP()=mp_getattr(o,nm); break; }
+            case I_STORE_ATTR:{ Value o=POP(), v=POP(), nm=v_obj(co->names[arg]);
+                if(fast_setattr(o,nm,v)) break;
+                mp_setattr(o,nm,v); break; }
             case I_DEL_ATTR:{ Value o=POP(); mp_delattr(o,v_obj(co->names[arg])); break; }
             case I_LOAD_METHOD:{
                 Value o=TOP(); Value name=v_obj(co->names[arg]); Type *t=TYPE(o);
@@ -317,9 +420,9 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
                     if(r>=0){ TOP()=v_bool(r); break; }
                 }
                 TOP()=mp_compare(arg,a,b); break; }
-            case I_JUMP: f->ip=arg; break;
-            case I_JUMP_IF_FALSE:{ Value v=POP(); if(v.k==V_BOOL ? !v.u.i : !mp_truth(v)) f->ip=arg; break; }
-            case I_JUMP_IF_TRUE:{ Value v=POP(); if(v.k==V_BOOL ? v.u.i : mp_truth(v)) f->ip=arg; break; }
+            case I_JUMP: if(arg<f->ip) TICK(); f->ip=arg; break;
+            case I_JUMP_IF_FALSE:{ Value v=POP(); if(v.k==V_BOOL ? !v.u.i : !mp_truth(v)){ if(arg<f->ip) TICK(); f->ip=arg; } break; }
+            case I_JUMP_IF_TRUE:{ Value v=POP(); if(v.k==V_BOOL ? v.u.i : mp_truth(v)){ if(arg<f->ip) TICK(); f->ip=arg; } break; }
             case I_JUMP_IF_FALSE_KEEP: if(!mp_truth(TOP())) f->ip=arg; break;
             case I_JUMP_IF_TRUE_KEEP: if(mp_truth(TOP())) f->ip=arg; break;
             case I_BUILD_TUPLE:{ Value t=mp_tuple(arg,f->stack+f->sp-arg); f->sp-=arg; PUSH(t); break; }
@@ -397,8 +500,15 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
                 Value it=TOP(), v;
                 if(IS(it,T_iter)){
                     IterObj *io=(IterObj*)it.u.o;
-                    if(io->kind==IT_RANGE){ if(io->n<=0){ f->sp--; f->ip=arg; break; } PUSH(v_int(io->i)); io->i+=((RangeObj*)io->src.u.o)->step; io->n--; break; }
-                    if(io->kind==IT_SEQ && IS_LIST(io->src)){ ListObj *l=AS_LIST(io->src); if(io->i>=l->len){ f->sp--; f->ip=arg; break; } PUSH(l->items[io->i++]); break; }
+                    uint32_t nx=co->code[f->ip]; int store= (nx&0xff)==I_STORE_FAST;   /* (for x in ...: x set at once) */
+                    if(io->kind==IT_RANGE){ if(io->n<=0){ f->sp--; f->ip=arg; break; }
+                        Value x=v_int(io->i); io->i+=((RangeObj*)io->src.u.o)->step; io->n--;
+                        if(store){ f->fast[nx>>8]=x; f->ip++; } else PUSH(x);
+                        break; }
+                    if(io->kind==IT_SEQ && IS_LIST(io->src)){ ListObj *l=AS_LIST(io->src); if(io->i>=l->len){ f->sp--; f->ip=arg; break; }
+                        Value x=l->items[io->i++];
+                        if(store){ f->fast[nx>>8]=x; f->ip++; } else PUSH(x);
+                        break; }
                     if((io->kind==IT_ENUM||io->kind==IT_ZIP||io->kind==IT_DICTI) && co->code[f->ip]==(uint32_t)(I_UNPACK|2<<8)){   /* for a, b in ...: no tuple */
                         Value a, b; int r=mp_next2(io,&a,&b);
                         if(!r){ f->sp--; f->ip=arg; break; }

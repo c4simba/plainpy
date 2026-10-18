@@ -41,3 +41,12 @@ TypeError: list indices must be integers or slices, not str
 TypeError: cannot use 'list' as a dict key (unhashable type: 'list')
 IndexError: list assignment index out of range
 L0 missing q 21 None
+False ['Sub', 'C', 'Base', 'object']
+D D ['C', 'D', 'Base', 'object'] ['Sub', 'C', 'D', 'Base', 'object'] (<class '__main__.D'>,) [<class '__main__.C'>] [<class '__main__.D'>]
+TypeError: can only assign non-empty tuple to C.__bases__, not ()
+TypeError: can only assign tuple to C.__bases__, not list
+TypeError: C.__bases__ must be tuple of classes, not 'int'
+TypeError: a __bases__ item causes an inheritance cycle
+TypeError: __bases__ assignment: 'D' deallocator differs from 'object'
+TypeError: cannot set '__bases__' attribute of immutable type 'int'
+False ['Sub', 'C', 'Base', 'object']

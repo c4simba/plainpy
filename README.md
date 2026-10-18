@@ -876,14 +876,14 @@ and times them both ways (the best of three runs; their outputs must match):
 
 | benchmark | what it does | CPython 3.14 | compiled | |
 |---|---|---|---|---|
-| `loops` | Collatz sequences: while, `%`, `//`, `*` on ints | 3.50 s | 0.22 s | 15.8x faster |
-| `power` | modular exponentiation by squaring, `i ** 3`, `x ** 1.5` | 2.83 s | 0.90 s | 3.1x faster |
-| `floats` | the Mandelbrot set, an integral of `sin(x) * sqrt(x)` | 1.97 s | 0.41 s | 4.8x faster |
-| `primes` | a sieve over a list, the gaps between primes in a dict | 2.70 s | 1.15 s | 2.3x faster |
-| `listcomp` | comprehensions: squares, a filter, tuples taken apart, strings, nested and flattening ones | 2.45 s | 0.71 s | 3.4x faster |
-| `dicts` | int and str keys: filling, `in`, `[]`, `get`, counting, `items()`, `values()`, `del`, a comprehension | 2.17 s | 1.23 s | 1.8x faster |
-| `trees` | trees whose nodes know their parent and kids: built, walked both ways, dropped (garbage cycles) | 1.73 s | 1.15 s | 1.5x faster |
-| `clock` | `time.time()`, `monotonic()`, `perf_counter()`; `datetime.now()`, `localtime()`, `strftime()` | 2.12 s | 2.12 s | the same |
+| `loops` | Collatz sequences: while, `%`, `//`, `*` on ints | 3.52 s | 0.22 s | 15.6x faster |
+| `power` | modular exponentiation by squaring, `i ** 3`, `x ** 1.5` | 2.85 s | 0.94 s | 3.0x faster |
+| `floats` | the Mandelbrot set, an integral of `sin(x) * sqrt(x)` | 1.98 s | 0.43 s | 4.6x faster |
+| `primes` | a sieve over a list, the gaps between primes in a dict | 2.87 s | 1.20 s | 2.4x faster |
+| `listcomp` | comprehensions: squares, a filter, tuples taken apart, strings, nested and flattening ones | 2.50 s | 0.72 s | 3.5x faster |
+| `dicts` | int and str keys: filling, `in`, `[]`, `get`, counting, `items()`, `values()`, `del`, a comprehension | 2.27 s | 1.26 s | 1.8x faster |
+| `trees` | trees whose nodes know their parent and kids: built, walked both ways, dropped (garbage cycles) | 1.73 s | 1.17 s | 1.5x faster |
+| `clock` | `time.time()`, `monotonic()`, `perf_counter()`; `datetime.now()`, `localtime()`, `strftime()` | 2.20 s | 2.17 s | the same |
 
 (an Apple M-series Mac, the macos target, 2026-10-18.) `loops` owes much to
 `n % 2` and `n // 2` being a mask and a shift. `dicts` took 195 s before
@@ -904,17 +904,23 @@ include that translation's cost - the more so the bigger the program, which
 is one C function: the same operation costs about twice as much once
 `datetime` is imported as in a small program. On x86 (Linux, KolibriOS) the
 same programs run as the i386 code itself. `--interp` adds plainpy's
-interpreter (2.49 s on `power`, 2.42 on `listcomp`, 3.90 on `loops`, 2.69 on
-`floats`, 3.58 on `primes`, 2.30 on `dicts`, 3.68 on `trees`, 2.23 on
-`clock`): faster than CPython on `power`, as fast on `listcomp`, 1.05 to 1.4
-times its time on the others but `trees`, 2.1 times (the collector of garbage
-cycles and the allocator take a third of it there). The attributes a class
-has are cached by type and name (`mp_type_lookup`, CPython's type cache), and
-so are the hooks it has (`__getattribute__`, `__getattr__`, `__setattr__`,
-`__delattr__`: `mp_type_hooks`) and what each `LOAD_GLOBAL` found - until a
-class's or a module's dict changes (`mp_type_epoch`, `mp_globals_epoch`); the
-eval loop does int and float arithmetic and comparisons and list, tuple and
-dict subscripts itself. It got there by `for a, b in enumerate(xs)`
+interpreter (1.60 s on `power`, 2.10 on `listcomp`, 2.68 on `loops`, 2.04 on
+`floats`, 2.28 on `primes`, 2.03 on `dicts`, 2.22 on `trees`, 1.95 on
+`clock`): faster than CPython on six of them, as fast on `floats`, 1.3 times
+its time on `trees` (every node an object with a dict of attributes, every
+tree a garbage cycle). What makes it so: the attributes a class has are
+cached by type and name (`mp_type_lookup`, CPython's type cache), so are the
+hooks it has (`__getattribute__`, `__getattr__`, `__setattr__`, `__delattr__`:
+`mp_type_hooks`) and what each `LOAD_GLOBAL` found - until a class's or a
+module's dict changes (`mp_type_epoch`, `mp_globals_epoch`); the eval loop
+does int and float arithmetic, comparisons, subscripts of lists, tuples and
+dicts and an instance's own attributes itself, and a `LOAD_FAST` / `CONST`
+does the instructions after it at once when they are numbers (`x % 2 == 0`
+and its jump, `x = x // 2`, `steps += 1`, `flags[j] = False`: `fused_load`),
+as `FOR_ITER` its `STORE_FAST`; collections and thread switches wait for a
+loop's jump back or a call instead of being counted on every instruction; a
+call's frame comes from a pool; the collector finds the objects the C stacks
+point into by a hash of 256-byte blocks instead of sorting all objects. It got there by `for a, b in enumerate(xs)`
 (and `zip(xs, ys)`, `d.items()`) not making a tuple per round, small
 objects' memory reused per size class, one walk of the heap per collection
 with the objects sorted by a radix sort instead of `qsort`, and the eval

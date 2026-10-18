@@ -874,12 +874,18 @@ def _hosts_lookup(name: str) -> str | None:
 
 
 def _nameservers() -> list[str]:
-    if sys.platform == "kolibrios":
-        ip = sys.syscall(76, 0x10004, 0)[0] & 0xFFFFFFFF   # fn 76: IPv4 (1), get DNS (4), device 0
-        if ip == 0 or ip == 0xFFFFFFFF:
-            return []
-        return [str(ip & 255) + "." + str((ip >> 8) & 255) + "." + str((ip >> 16) & 255) + "." + str((ip >> 24) & 255)]
     out: list[str] = []
+    if sys.platform == "kolibrios":
+        # each device's name server (device 0 is the loopback, without one: the
+        # network cards come after it)
+        count = sys.syscall(74, 255)[0] & 255              # fn 74.-1: the number of devices
+        for dev in range(count):
+            ip = sys.syscall(76, 0x10004 | (dev << 8), 0)[0] & 0xFFFFFFFF   # fn 76: IPv4 (1), get DNS (4)
+            if ip != 0 and ip != 0xFFFFFFFF:
+                server = str(ip & 255) + "." + str((ip >> 8) & 255) + "." + str((ip >> 16) & 255) + "." + str((ip >> 24) & 255)
+                if server not in out:
+                    out.append(server)
+        return out
     for line in _read_text("/etc/resolv.conf").split("\n"):
         words = line.split()
         if len(words) >= 2 and words[0] == "nameserver" and _is_ipv4(words[1]):

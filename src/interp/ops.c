@@ -185,7 +185,13 @@ static void repr_into(SBuf *b, Value v){
     }
     default_repr_into(b,v);
 }
-Value mp_repr(Value v){ SBuf b={0}; repr_into(&b,v); return sb_value(&b); }
+Value mp_repr(Value v){
+    if(v.k==V_INT){                                       /* (an int's text: written here, no buffer to make and drop) */
+        char buf[24], *e=buf+sizeof buf, *p=e; uint64_t u= v.u.i<0 ? (uint64_t)0-(uint64_t)v.u.i : (uint64_t)v.u.i;
+        do{ *--p=(char)('0'+u%10); u/=10; }while(u);
+        if(v.u.i<0) *--p='-';
+        return mp_strn(p,e-p); }
+    SBuf b={0}; repr_into(&b,v); return sb_value(&b); }
 void mp_repr_into(SBuf *b, Value v){ repr_into(b,v); }
 
 Value mp_exc_str(Value e){
@@ -447,7 +453,7 @@ static Value builtin_binop(int op, Value a, Value b){
         case OP_Add:
             if(IS_STR(a)){
                 if(!IS_STR(b)) mp_raise_t(E_TypeError,"can only concatenate str (not \"%s\") to str",tb->name->s);
-                StrObj *x=AS_STR(a), *y=AS_STR(b); SBuf s={0}; sb_put(&s,x->s,x->len); sb_put(&s,y->s,y->len); return sb_value(&s); }
+                return mp_str_concat(a,b); }
             if(IS_LIST(a)){
                 if(!IS_LIST(b)) mp_raise_t(E_TypeError,"can only concatenate list (not \"%s\") to list",tb->name->s);
                 ListObj *x=AS_LIST(a), *y=AS_LIST(b); Value l=mp_list(x->len+y->len,NULL);

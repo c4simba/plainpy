@@ -73,6 +73,27 @@ static Obj *small_str[257], *small_bytes[257], *empty_tuple;
 #define NCLASSES 16
 #endif
 static void *mp_free_small[NCLASSES+1];
+/* the tables of dicts (entries, index): a size's freed ones kept for the next (16 bytes apart, up to
+   512), not given back to malloc and taken again with every small dict */
+#if !defined(PPY_LOWMEM)
+#define AP_CLASSES 32
+static void *ap_free[AP_CLASSES+1];
+static void *arr_alloc(size_t n){
+    size_t c=(n+15)>>4;
+    if(c<=AP_CLASSES){ void *p=ap_free[c]; if(p){ ap_free[c]=*(void**)p; return p; } return xmalloc(c<<4); }
+    return xmalloc(n);
+}
+static void arr_free(void *p, size_t n){
+    if(!p) return;
+    size_t c=(n+15)>>4;
+    if(c<=AP_CLASSES){ *(void**)p=ap_free[c]; ap_free[c]=p; return; }
+    free(p);
+}
+#else
+#define arr_alloc(n) xmalloc(n)
+#define arr_free(p,n) free(p)
+#endif
+static uintptr_t heap_lo=UINTPTR_MAX, heap_hi;            /* where objects have been: the words of C stacks outside are not theirs */
 void *mp_alloc(Type *t, size_t size){
     size_t c=(size+(1u<<CLASS_SHIFT)-1)>>CLASS_SHIFT; Obj *o;
 #if !defined(PPY_LOWMEM)
@@ -84,6 +105,8 @@ void *mp_alloc(Type *t, size_t size){
     memset(o,0,size);
     o->type=t; o->size=(uint32_t)size;
     o->gcnext=gc_head; gc_head=o; gc_count++; gc_account(size);
+    if((uintptr_t)o<heap_lo) heap_lo=(uintptr_t)o;
+    if((uintptr_t)o+size>heap_hi) heap_hi=(uintptr_t)o+size;
     return o;
 }
 
@@ -167,11 +190,12 @@ static void mark_children(Obj *o){
         default: break;
     }
 }
+void mp_dict_clear(DictObj *d);
 static void free_obj(Obj *o){
     switch(o->type->layout){
         case LY_TYPE: free(((Type*)o)->mro); mp_type_epoch++; break;      /* (another type may come at its address) */
         case LY_LIST: free(((ListObj*)o)->items); break;
-        case LY_DICT: mp_dict_changed((DictObj*)o); free(((DictObj*)o)->ent); free(((DictObj*)o)->idx); break;
+        case LY_DICT: mp_dict_changed((DictObj*)o); mp_dict_clear((DictObj*)o); break;
         case LY_SET: free(((SetObj*)o)->table); break;
         case LY_CODE:{ CodeObj *c=(CodeObj*)o; if(!(c->flags&CO_BORROWED)){ free(c->code); free(c->loc); free(c->carets); } free(c->gcache); free(c->consts); free(c->names); free(c->varnames); free(c->cellnames); free(c->freenames); free(c->cellarg);
             if(c->annots){ for(int i=0;i<c->argc+c->kwonly+2;i++) free(c->annots[i]); free(c->annots); }
@@ -191,29 +215,41 @@ static void free_obj(Obj *o){
     (void)c; free(o);
 #endif
 }
-/* the objects, sorted: is a word a pointer into one? */
-static Obj **sorted; static int64_t nsorted;
-static Obj **sorted_tmp; static int64_t sorted_cap;
-static void sort_objs(void){                                 /* by address: a radix sort, a byte at a time (the bytes all objects share skipped) */
-    if(sorted_cap<nsorted){ sorted_cap=nsorted; sorted_tmp=(Obj**)xrealloc(sorted_tmp,sizeof(Obj*)*(size_t)sorted_cap); }
-    Obj **a=sorted, **b=sorted_tmp;
-    for(int shift=0;shift<(int)(8*sizeof(uintptr_t));shift+=8){
-        int64_t count[257]; memset(count,0,sizeof count);
-        for(int64_t i=0;i<nsorted;i++) count[(((uintptr_t)a[i]>>shift)&255)+1]++;
-        int same=0; for(int d=1;d<=256;d++) if(count[d]==nsorted) same=1;
-        if(same) continue;
-        for(int d=1;d<=256;d++) count[d]+=count[d-1];
-        for(int64_t i=0;i<nsorted;i++) b[count[((uintptr_t)a[i]>>shift)&255]++]=a[i];
-        Obj **t=a; a=b; b=t;
-    }
-    if(a!=sorted) memcpy(sorted,a,sizeof(Obj*)*(size_t)nsorted);
+/* The C stacks and registers are scanned conservatively: a word there that points into an object
+   keeps it. The words that may (within the heap's range) are collected first, sorted, and their
+   256-byte blocks put in a small hash set; the walk of all objects then asks the set about each
+   object's blocks - a probe or two an object, an exact look only near such a word (no sorting
+   of the objects themselves). */
+#define CB_SHIFT 8
+static uintptr_t *cand; static size_t ncand, ccand;
+static uintptr_t *cblk; static size_t cblk_size;            /* block number + 1; 0: empty */
+static int cmp_word(const void *a, const void *b){ uintptr_t x=*(const uintptr_t*)a, y=*(const uintptr_t*)b; return x<y ? -1 : x>y; }
+static inline size_t cblk_slot(uintptr_t blk){ return (size_t)((blk*(uintptr_t)0x9E3779B97F4A7C15ull)>>7)&(cblk_size-1); }
+static void cand_index(void){
+    qsort(cand,ncand,sizeof(uintptr_t),cmp_word);
+    size_t n=0; for(size_t i=0;i<ncand;i++) if(!n || cand[n-1]!=cand[i]) cand[n++]=cand[i];
+    ncand=n;
+    size_t want=16; while(want<ncand*4) want*=2;
+    if(want!=cblk_size){ free(cblk); cblk_size=want; cblk=(uintptr_t*)xmalloc(sizeof(uintptr_t)*cblk_size); }
+    memset(cblk,0,sizeof(uintptr_t)*cblk_size);
+    for(size_t i=0;i<ncand;i++){ uintptr_t blk=(cand[i]>>CB_SHIFT)+1; size_t p=cblk_slot(blk);
+        while(cblk[p] && cblk[p]!=blk) p=(p+1)&(cblk_size-1);
+        cblk[p]=blk; }
 }
-static Obj *find_obj(uintptr_t w){
-    int64_t lo=0, hi=nsorted-1, best=-1;
-    while(lo<=hi){ int64_t m=(lo+hi)/2; if((uintptr_t)sorted[m]<=w){ best=m; lo=m+1; } else hi=m-1; }
-    if(best<0) return NULL;
-    Obj *o=sorted[best];
-    return w<(uintptr_t)o+o->size ? o : NULL;
+static inline int cblk_has(uintptr_t blk){
+    blk++; size_t p=cblk_slot(blk);
+    while(cblk[p]){ if(cblk[p]==blk) return 1; p=(p+1)&(cblk_size-1); }
+    return 0;
+}
+/* does a collected word point into o? */
+static inline int cand_hits(Obj *o){
+    uintptr_t a=(uintptr_t)o, e=a+o->size;
+    if(!ncand) return 0;
+    uintptr_t b0=a>>CB_SHIFT, b1=(e-1)>>CB_SHIFT;
+    if(b1-b0<64){ int any=0; for(uintptr_t b=b0;b<=b1 && !any;b++) any=cblk_has(b); if(!any) return 0; }
+    size_t lo=0, hi=ncand;
+    while(lo<hi){ size_t m=(lo+hi)/2; if(cand[m]<a) lo=m+1; else hi=m; }
+    return lo<ncand && cand[lo]<e;
 }
 #if defined(__has_feature)
 # if __has_feature(address_sanitizer)
@@ -225,7 +261,10 @@ static Obj *find_obj(uintptr_t w){
 #endif
 NO_ASAN static void scan_words(void *lo, void *hi){
     uintptr_t a=(uintptr_t)lo & ~(uintptr_t)(sizeof(void*)-1);
-    for(void **p=(void**)a;(void*)p<hi;p++){ Obj *o=find_obj((uintptr_t)*p); if(o) mark_obj(o); }
+    for(void **p=(void**)a;(void*)p<hi;p++){ uintptr_t w=(uintptr_t)*p;
+        if(w<heap_lo || w>=heap_hi) continue;
+        if(ncand==ccand){ ccand=ccand?ccand*2:1024; cand=(uintptr_t*)xrealloc(cand,sizeof(uintptr_t)*ccand); }
+        cand[ncand++]=w; }
 }
 static Obj **gc_gens; static int64_t ngc_gens, cgc_gens;   /* the generators among the objects (one walk finds them) */
 #if defined(PPY_WASM)
@@ -244,13 +283,22 @@ static void gc_collect_now(void){
 #else
 void mp_gc_collect(void){
 #endif
-    sorted=(Obj**)xrealloc(sorted,sizeof(Obj*)*(size_t)(gc_count>0?gc_count:1)); nsorted=0; ngc_gens=0;
-    msp=0;
-    for(Obj *o=gc_head;o;o=o->gcnext){ o->mark=0; sorted[nsorted++]=o;    /* one walk of the list: the rest goes by the array */
-        if(o->type->layout==LY_GEN){ if(ngc_gens==cgc_gens){ cgc_gens=cgc_gens?cgc_gens*2:64; gc_gens=(Obj**)xrealloc(gc_gens,sizeof(Obj*)*(size_t)cgc_gens); } gc_gens[ngc_gens++]=o; } }
-    for(int64_t i=0;i<nsorted;i++){ Obj *o=sorted[i];         /* the interpreter's own types stay, instances or not */
-        if(o->type==T_type && (((Type*)o)->flags&TF_BUILTIN)) mark_obj(o); }
-    sort_objs();
+    ngc_gens=0; msp=0; ncand=0;
+    for(int t=0;t<mp_nthreads;t++){ Thread *th=mp_threads[t];   /* the words of the C stacks and registers */
+        if(th==mp_ts){
+            jmp_buf regs; memset(&regs,0,sizeof regs); (void)MP_SETJMP(regs);
+            scan_words(&regs,(char*)&regs+sizeof regs);
+            volatile char here;
+            if(th->cstack_base && (void*)&here<th->cstack_base) scan_words((void*)&here,th->cstack_base);
+        } else {
+            scan_words(&regs_of[t],(char*)&regs_of[t]+sizeof(jmp_buf));
+            if(th->cstack_base && th->cstack_top && th->cstack_top<th->cstack_base) scan_words(th->cstack_top,th->cstack_base);
+        }
+    }
+    cand_index();
+    for(Obj *o=gc_head;o;o=o->gcnext){ o->mark=0;                /* one walk: marks cleared, generators listed, what those words point into kept */
+        if(o->type->layout==LY_GEN){ if(ngc_gens==cgc_gens){ cgc_gens=cgc_gens?cgc_gens*2:64; gc_gens=(Obj**)xrealloc(gc_gens,sizeof(Obj*)*(size_t)cgc_gens); } gc_gens[ngc_gens++]=o; }
+        if((o->type==T_type && (((Type*)o)->flags&TF_BUILTIN)) || cand_hits(o)) mark_obj(o); }   /* (the interpreter's own types stay) */
     mark_obj((Obj*)mp_builtins); mark_obj((Obj*)mp_modules);
     mark_v(mp_NotImplemented); mark_v(mp_Ellipsis);
     for(int i=0;i<nextra;i++) mark_v(*extra_roots[i]);
@@ -262,15 +310,6 @@ void mp_gc_collect(void){
         mark_v(th->exc);
         for(int i=0;i<th->nhandled;i++) mark_v(th->handled[i]);
         for(int i=0;i<8;i++) mark_v(th->roots[i]);
-        if(th==mp_ts){
-            jmp_buf regs; memset(&regs,0,sizeof regs); (void)MP_SETJMP(regs);
-            scan_words(&regs,(char*)&regs+sizeof regs);
-            volatile char here;
-            if(th->cstack_base && (void*)&here<th->cstack_base) scan_words((void*)&here,th->cstack_base);
-        } else {
-            scan_words(&regs_of[t],(char*)&regs_of[t]+sizeof(jmp_buf));
-            if(th->cstack_base && th->cstack_top && th->cstack_top<th->cstack_base) scan_words(th->cstack_top,th->cstack_base);
-        }
     }
     /* generator frames are reached through their objects; frames on a thread's chain above */
     while(msp>0) mark_children(mstack[--msp]);
@@ -280,14 +319,14 @@ void mp_gc_collect(void){
             if(nfinal==cfinal){ cfinal=cfinal?cfinal*2:16; final=(Value*)xrealloc(final,sizeof(Value)*(size_t)cfinal); }
             final[nfinal++]=v_obj(o); mark_obj(o); } }
     while(msp>0) mark_children(mstack[--msp]);
-    Obj *head=NULL;                                                /* the survivors, listed again (by address) */
-    for(int64_t i=nsorted-1;i>=0;i--){ Obj *o=sorted[i]; if(o->mark){ o->gcnext=head; head=o; } else { free_obj(o); gc_count--; } }
-    gc_head=head; nsorted=0;                                       /* (find_obj's array is stale now) */
+    Obj **keep=&gc_head;                                           /* the survivors stay listed, in their order */
+    for(Obj *o=gc_head, *next;o;o=next){ next=o->gcnext; if(o->mark){ *keep=o; keep=&o->gcnext; } else { free_obj(o); gc_count--; } }
+    *keep=NULL;
     gc_threshold=gc_count*2+100000;
 #if defined(PPY_LOWMEM)
     { int64_t live=0; for(Obj *o=gc_head;o;o=o->gcnext) live+=o->size;
       gc_bytes_limit=live/2+GC_SLACK; gc_threshold=INT64_MAX;
-      free(sorted); sorted=NULL; }                                 /* (the collector's array: not kept between collections) */
+      free(cand); cand=NULL; ccand=0; }                            /* (the collector's array: not kept between collections) */
 #endif
     gc_bytes=0;
     if(!finalizing){ finalizing=1;
@@ -315,6 +354,17 @@ void sb_printf(SBuf *b, const char *fmt, ...){
     char tmp[512]; va_list ap; va_start(ap,fmt); int n=vsnprintf(tmp,sizeof tmp,fmt,ap); va_end(ap);
     if(n<(int)sizeof tmp){ sb_put(b,tmp,n); return; }
     char *big=(char*)xmalloc((size_t)n+1); va_start(ap,fmt); vsnprintf(big,(size_t)n+1,fmt,ap); va_end(ap); sb_put(b,big,n); free(big);
+}
+/* a + b of two strs: made at once (an empty one: the other, as CPython) */
+Value mp_str_concat(Value a, Value b){
+    StrObj *x=AS_STR(a), *y=AS_STR(b);
+    if(!x->len) return b;
+    if(!y->len) return a;
+    int64_t n=x->len+y->len;
+    StrObj *o=(StrObj*)mp_alloc(T_str,sizeof(StrObj)+(size_t)n+1);
+    memcpy(o->s,x->s,(size_t)x->len); memcpy(o->s+x->len,y->s,(size_t)y->len); o->s[n]=0;
+    o->len=n; o->cplen=x->cplen+y->cplen; o->ascii=(uint8_t)(x->ascii && y->ascii);
+    return v_obj(o);
 }
 Value sb_value(SBuf *b){ Value v=mp_strn(b->s?b->s:"",b->n); free(b->s); b->s=NULL; b->n=b->cap=0; return v; }
 
@@ -364,7 +414,19 @@ int64_t mp_str_byteoff(StrObj *s, int64_t cpi){
    made to ask - and kept for good (the collector marks them all) */
 static uint64_t hash_bytes(const unsigned char *s, int64_t n);
 static void itab_put(StrObj *o){ size_t m=itab_size-1, p=(size_t)o->hash&m; while(itab[p]) p=(p+1)&m; itab[p]=o; }
+/* the str a C string was interned as last, by its address (checked by its text: a buffer may hold
+   another text at the same address later) - mp_type_lookup_s(t, "__init__") and the like */
+static Value mp_intern_new(const char *s);
+#define ICACHE_SIZE 256
+static struct { const char *p; StrObj *o; } icache[ICACHE_SIZE];
 Value mp_intern(const char *s){
+    size_t ci=(((uintptr_t)s>>3)^((uintptr_t)s>>11))&(ICACHE_SIZE-1);
+    if(icache[ci].p==s && !strcmp(icache[ci].o->s,s)) return v_obj(icache[ci].o);
+    Value r=mp_intern_new(s);
+    icache[ci].p=s; icache[ci].o=AS_STR(r);
+    return r;
+}
+static Value mp_intern_new(const char *s){
     size_t n=strlen(s);
     uint64_t h=hash_bytes((const unsigned char*)s,(int64_t)n);
     if((itab_used+1)*4>=itab_size*3){
@@ -569,9 +631,14 @@ static void dict_rebuild(DictObj *d, int64_t need){
     for(int64_t i=0;i<d->nent;i++) if(d->ent[i].key.k!=V_UNDEF) d->ent[j++]=d->ent[i];
     d->nent=j;
     int64_t want=need>j?need:j;
-    if(d->cap<want+1){ d->cap=want<4?4:want+want/2; d->ent=(DEnt*)xrealloc(d->ent,sizeof(DEnt)*(size_t)d->cap); gc_account(sizeof(DEnt)*(size_t)d->cap); }
+    if(d->cap<want+1){ int64_t cap=want<4?4:want+want/2;
+        DEnt *ne=(DEnt*)arr_alloc(sizeof(DEnt)*(size_t)cap);
+        if(d->nent) memcpy(ne,d->ent,sizeof(DEnt)*(size_t)d->nent);
+        arr_free(d->ent,sizeof(DEnt)*(size_t)d->cap);
+        d->ent=ne; d->cap=cap; gc_account(sizeof(DEnt)*(size_t)d->cap); }
     int64_t isz=8; while(isz*2<=d->cap*3) isz*=2;
-    free(d->idx); d->isize=isz; d->idx=xmalloc(ix_bytes(isz));
+    if(d->idx) arr_free(d->idx,ix_bytes(d->isize));
+    d->isize=isz; d->idx=arr_alloc(ix_bytes(isz));
     memset(d->idx,0xff,ix_bytes(isz));                    /* (all -1) */
     for(int64_t i=0;i<d->nent;i++){
         uint64_t h=d->ent[i].hash, m=(uint64_t)isz-1, p=h&m, perturb=h;
@@ -601,6 +668,7 @@ static int64_t dict_lookup(DictObj *d, Value key, uint64_t h, int *found){
 /* a dict key's / set element's hash: a TypeError from hashing becomes CPython 3.14's
    "cannot use 'list' as a dict key (unhashable type: 'list')" */
 static uint64_t hash_as(Value key, const char *what){
+    if(key.k==V_OBJ && key.u.o->type==T_str && ((StrObj*)key.u.o)->hashed) return ((StrObj*)key.u.o)->hash;   /* (a str's, known: most keys) */
     if(key.k!=V_OBJ) return mp_hash(key);
     Type *t=key.u.o->type;
     if(t==T_str || t==T_bytes || t==T_frozenset || (t==T_tuple && ((TupleObj*)key.u.o)->hashed) || (!(t->flags&TF_DUNDERS) && t->layout!=LY_TUPLE
@@ -611,6 +679,12 @@ static uint64_t hash_as(Value key, const char *what){
     if(e.k==V_OBJ && e.u.o->type==E_TypeError){ Value m=mp_tostr(e); mp_raise_t(E_TypeError,"cannot use '%s' as a %s (%s)",t->name->s,what,AS_STR(m)->s); }
     mp_raise(e);
     return 0;
+}
+/* empty, its tables given back (dict.clear(), a dict freed) */
+void mp_dict_clear(DictObj *d){
+    arr_free(d->ent,sizeof(DEnt)*(size_t)d->cap);
+    if(d->idx) arr_free(d->idx,ix_bytes(d->isize));
+    d->ent=NULL; d->idx=NULL; d->nent=d->cap=d->used=d->isize=0;
 }
 int mp_dict_get(DictObj *d, Value key, Value *out){
     uint64_t h=hash_as(key,"dict key"); int found;

@@ -157,3 +157,49 @@ class M(dict):
 
 
 print(L([1, 2])[0], M()["q"], xs[True], d.get("zz"))
+
+
+# __bases__ assignment: the MRO made again (the subclasses' too), what lookups cached before not used
+class Base:
+    pass
+
+
+class C(Base):
+    pass
+
+
+class D(Base):
+    def who(self):
+        return "D"
+
+
+class Sub(C):
+    pass
+
+
+c = C()
+s = Sub()
+print(hasattr(c, "who"), [k.__name__ for k in Sub.__mro__])
+C.__bases__ = (D,)
+print(c.who(), s.who(), [k.__name__ for k in C.__mro__], [k.__name__ for k in Sub.__mro__], C.__bases__, D.__subclasses__(), Base.__subclasses__())
+for bad in ((), [D], (1,), (Sub,)):
+    try:
+        C.__bases__ = bad
+    except TypeError as e:
+        print("TypeError:", e)
+
+
+class E:
+    pass
+
+
+try:
+    E.__bases__ = (D,)
+except TypeError as e:
+    print("TypeError:", e)
+try:
+    int.__bases__ = (object,)
+except TypeError as e:
+    print("TypeError:", e)
+C.__bases__ = (Base,)
+print(hasattr(c, "who"), [k.__name__ for k in Sub.__mro__])

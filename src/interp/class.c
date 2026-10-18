@@ -88,10 +88,12 @@ Value mp_instance_call(Type *t, int argc, Value *argv, TupleObj *kw){
     if(t==E_OSError && argc>=2 && IS_INTLIKE(argv[0])){ Type *sub=oserror_subtype(argv[0].u.i); if(sub) t=sub; }
     Value nw=mp_type_lookup_s(t,"__new__");
     Value self;
+    Value small[8];                                          /* (self and the arguments: on the C stack, where the collector looks, when they fit) */
     if(nw.k!=V_UNDEF && !IS(nw,T_native)){
-        Value keep=mp_tuple(argc+1,NULL); AS_TUPLE(keep)->items[0]=v_obj(t); memcpy(AS_TUPLE(keep)->items+1,argv,sizeof(Value)*(size_t)argc);
+        Value *a= argc+1<=8 ? small : AS_TUPLE(mp_tuple(argc+1,NULL))->items;
+        a[0]=v_obj(t); memcpy(a+1,argv,sizeof(Value)*(size_t)argc);
         Value fn= IS(nw,T_staticmethod) ? ((BoxObj*)nw.u.o)->v : nw;
-        self=mp_call(fn,argc+1,AS_TUPLE(keep)->items,kw);
+        self=mp_call(fn,argc+1,a,kw);
         if(!mp_isinstance(self,t)) return self;
     } else {
         int np=argc-(kw?(int)kw->len:0);
@@ -100,8 +102,9 @@ Value mp_instance_call(Type *t, int argc, Value *argv, TupleObj *kw){
     }
     Value init=mp_type_lookup_s(t,"__init__");
     if(init.k!=V_UNDEF && !IS(init,T_native)){
-        Value keep=mp_tuple(argc+1,NULL); AS_TUPLE(keep)->items[0]=self; memcpy(AS_TUPLE(keep)->items+1,argv,sizeof(Value)*(size_t)argc);
-        Value r=mp_call(init,argc+1,AS_TUPLE(keep)->items,kw);
+        Value *a= argc+1<=8 ? small : AS_TUPLE(mp_tuple(argc+1,NULL))->items;
+        a[0]=self; memcpy(a+1,argv,sizeof(Value)*(size_t)argc);
+        Value r=mp_call(init,argc+1,a,kw);
         if(!IS_NONE(r)) mp_raise_t(E_TypeError,"__init__() should return None, not '%s'",mp_type_name(r));
     } else if(init.k!=V_UNDEF && IS(init,T_native)){
         Value keep=mp_tuple(argc+1,NULL); AS_TUPLE(keep)->items[0]=self; memcpy(AS_TUPLE(keep)->items+1,argv,sizeof(Value)*(size_t)argc);
@@ -140,11 +143,59 @@ static void compute_mro(Type *t){
 void mp_type_finish(Type *t){ compute_mro(t); }
 /* base->subs gets t (__subclasses__); the built-in types made before list: when list is there */
 static Type *pend_base[64], *pend_sub[64]; static int npend;
+static Type *solid_base(TupleObj *b);
 static void note_subclass(Type *base, Type *t){
     if(!T_list){ if(npend<64){ pend_base[npend]=base; pend_sub[npend]=t; npend++; } return; }
     for(int i=0;i<npend;i++){ Type *b=pend_base[i]; if(b->subs.k!=V_OBJ) b->subs=mp_list(0,NULL); mp_list_append(b->subs,v_obj(pend_sub[i])); }
     npend=0;
     if(base->subs.k!=V_OBJ) base->subs=mp_list(0,NULL); mp_list_append(base->subs,v_obj(t));
+}
+/* the layout bases give: the most derived non-object one among them */
+static Type *solid_base(TupleObj *b){
+    Type *solid=T_object;
+    for(int64_t i=0;i<b->len;i++){
+        Type *x=AS_TYPE(b->items[i]), *s=x;
+        while(s && s->layout==LY_INSTANCE && s!=T_object && (s->flags&TF_HEAP)) s=s->base;
+        if(!s) s=T_object;
+        if(s->layout==LY_EXC) s=E_BaseException;              /* (the exceptions share one layout: class E(ValueError, IndexError)) */
+        if(s!=T_object){
+            if(solid==T_object || mp_is_subtype(s,solid)) solid=s;
+            else if(!mp_is_subtype(solid,s)) mp_raise_t(E_TypeError,"multiple bases have instance lay-out conflict");
+        }
+    }
+    return solid;
+}
+static void drop_subclass(Type *base, Type *t){
+    if(base->subs.k!=V_OBJ) return;
+    ListObj *l=AS_LIST(base->subs); int64_t j=0;
+    for(int64_t i=0;i<l->len;i++) if(l->items[i].u.o!=(Obj*)t) l->items[j++]=l->items[i];
+    l->len=j;
+}
+static void mro_again(Type *t){                              /* t's MRO and its subclasses' */
+    compute_mro(t);
+    if(t->subs.k==V_OBJ){ ListObj *l=AS_LIST(t->subs); for(int64_t i=0;i<l->len;i++) mro_again(AS_TYPE(l->items[i])); }
+}
+/* C.__bases__ = (...), as CPython's type_set_bases: a non-empty tuple of classes of the same layout,
+   no cycle; the MRO made again (the subclasses' too), the old bases back if that fails */
+void mp_type_set_bases(Type *t, Value v){
+    const char *n=t->name->s;
+    if(!IS_TUPLE(v)) mp_raise_t(E_TypeError,"can only assign tuple to %s.__bases__, not %s",n,mp_type_name(v));
+    TupleObj *b=AS_TUPLE(v);
+    if(b->len==0) mp_raise_t(E_TypeError,"can only assign non-empty tuple to %s.__bases__, not ()",n);
+    for(int64_t i=0;i<b->len;i++){
+        if(!IS_TYPE(b->items[i])) mp_raise_t(E_TypeError,"%s.__bases__ must be tuple of classes, not '%s'",n,mp_type_name(b->items[i]));
+        if(mp_is_subtype(AS_TYPE(b->items[i]),t)) mp_raise_t(E_TypeError,"a __bases__ item causes an inheritance cycle"); }
+    Type *oldb=t->base, *newb=AS_TYPE(b->items[0]);
+    if(((oldb->flags&TF_HEAP)!=0)!=((newb->flags&TF_HEAP)!=0) || (!(oldb->flags&TF_HEAP) && oldb!=newb))
+        mp_raise_t(E_TypeError,"__bases__ assignment: '%s' deallocator differs from '%s'",newb->name->s,oldb->name->s);
+    if(solid_base(b)!=solid_base(t->bases)) mp_raise_t(E_TypeError,"__bases__ assignment: '%s' object layout differs from '%s'",newb->name->s,oldb->name->s);
+    TupleObj *old=t->bases;
+    t->bases=b; t->base=newb;
+    Catch c;
+    if(!CATCH_BEGIN(c)){ mro_again(t); CATCH_END(c); }
+    else { Value e=mp_catch_exc(&c); t->bases=old; t->base=oldb; mro_again(t); mp_raise(e); }
+    for(int64_t i=0;i<old->len;i++) drop_subclass(AS_TYPE(old->items[i]),t);
+    for(int64_t i=0;i<b->len;i++) note_subclass(AS_TYPE(b->items[i]),t);
 }
 Value mp_make_class(Value name, Value bases, DictObj *ns){ return mp_make_class_kw(T_type,name,bases,ns,0,NULL,NULL); }
 Value mp_make_class_kw(Type *meta, Value name, Value bases, DictObj *ns, int nkw, Value *kwv, TupleObj *kwn){
@@ -160,18 +211,7 @@ Value mp_make_class_kw(Type *meta, Value name, Value bases, DictObj *ns, int nkw
     { static const char *const implicit[]={"__init_subclass__","__class_getitem__"};   /* plain functions: classmethods (as CPython) */
       for(int i=0;i<2;i++){ Value f; if(mp_dict_get_s(ns,implicit[i],&f) && IS(f,T_function)){
           BoxObj *cm=(BoxObj*)mp_alloc(T_classmethod,sizeof(BoxObj)); cm->v=f; mp_dict_set(ns,mp_intern(implicit[i]),v_obj(cm)); } } }
-    /* the layout: the most derived non-object one among the bases */
-    Type *solid=T_object;
-    for(int64_t i=0;i<b->len;i++){
-        Type *x=AS_TYPE(b->items[i]), *s=x;
-        while(s && s->layout==LY_INSTANCE && s!=T_object && (s->flags&TF_HEAP)) s=s->base;
-        if(!s) s=T_object;
-        if(s->layout==LY_EXC) s=E_BaseException;              /* (the exceptions share one layout: class E(ValueError, IndexError)) */
-        if(s!=T_object){
-            if(solid==T_object || mp_is_subtype(s,solid)) solid=s;
-            else if(!mp_is_subtype(solid,s)) mp_raise_t(E_TypeError,"multiple bases have instance lay-out conflict");
-        }
-    }
+    Type *solid=solid_base(b);
     t->base=AS_TYPE(b->items[0]);
     for(int64_t i=0;i<b->len;i++) note_subclass(AS_TYPE(b->items[i]),t);
     t->layout= solid==T_object ? LY_INSTANCE : solid->layout;

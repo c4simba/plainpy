@@ -103,6 +103,8 @@ struct Type {
    __setattr__, __delattr__; any __getattr__ (mp_type_lookup_s) */
 enum { TH_GETATTRIBUTE=1, TH_GETATTR=2, TH_SETATTR=4, TH_DELATTR=8, TH_GETATTR_ANY=16 };
 unsigned mp_type_hooks(Type *t);
+static inline unsigned mp_type_hooks_now(Type *t){ return t->hook_epoch==mp_type_epoch ? t->hooks : mp_type_hooks(t); }
+void mp_type_set_bases(Type *t, Value bases);
 static inline void mp_tdict_watch(DictObj *d);
 enum { TF_BUILTIN=1, TF_BASETYPE=2, TF_HEAP=4, TF_DUNDERS=8 /* a class: look its dunders up */, TF_ABSTRACT_DONE=16,
        TF_SUBVAL=32 /* a subclass of str, bytes, tuple, list, dict, set, frozenset, int or float: its objects have the
@@ -113,6 +115,8 @@ enum { TF_BUILTIN=1, TF_BASETYPE=2, TF_HEAP=4, TF_DUNDERS=8 /* a class: look its
 enum { CO_VARARGS=1, CO_VARKW=2, CO_GEN=4, CO_CORO=8, CO_ASYNCGEN=16, CO_CLASS=32, CO_MODULE=64, CO_NESTED=128, CO_COMP=256,
        CO_BORROWED=0x20000000 /* code / loc where a bytecode file mapped for good has them (bytecode.c): not freed */ };
 /* what a LOAD_GLOBAL found, valid while mp_globals_epoch is epoch and the frame's dicts are these */
+Value mp_str_concat(Value a, Value b);
+void mp_dict_clear(DictObj *d);
 typedef struct GCache { uint64_t epoch; DictObj *g, *b; Value v; } GCache;
 typedef struct CodeObj {
     Obj h;
@@ -166,7 +170,8 @@ typedef struct Frame {
     int state;                                   /* FS_* */
     int hbase;                                   /* the thread's handled-exception depth when it started running */
     int nopush;                                  /* resumed without a value (a yield from that ended) */
-    Value saved_exc[8]; int nsaved;              /* a suspended generator's exceptions being handled */
+    int nsaved; Value saved_exc[8];              /* a suspended generator's exceptions being handled (saved_exc: read up to
+                                                    nsaved, not cleared when a frame is made - frame_new) */
 } Frame;
 enum { FS_NEW, FS_RUNNING, FS_SUSPENDED, FS_DONE };
 enum { G_GEN, G_CORO, G_ASYNCGEN };

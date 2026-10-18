@@ -358,6 +358,7 @@ void mp_setattr(Value o, Value name, Value v){
             Value sa=mp_type_lookup_s(t,"__setattr__");
             if(sa.k!=V_UNDEF && !IS(sa,T_native)){ Value a[3]={o,name,v}; mp_call(sa,3,a,NULL); return; } }
         if(c->flags&TF_BUILTIN) mp_raise_t(E_TypeError,"cannot set '%s' attribute of immutable type '%s'",mp_cstr(name),c->name->s);
+        if(mp_str_eq_c(name,"__bases__")){ mp_type_set_bases(c,v); return; }
         mp_dict_set(c->dict,name,v); return;
     }
     Value d=mp_type_lookup(t,name);

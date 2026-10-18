@@ -4,10 +4,35 @@
 
 #include "run.h"
 
-Frame *frame_new(CodeObj *co, FuncObj *fn, DictObj *globals, DictObj *locals){
+/* Frames of calls are kept for the next ones (a few of each size, 64 bytes apart), not given back to
+   malloc and taken again on every call. A frame is malloc's either way: free() of one is right too. */
+#if !defined(PPY_LOWMEM)
+#define FPOOL_CLASSES 64
+#define FPOOL_DEPTH 8
+static void *fpool[FPOOL_CLASSES][FPOOL_DEPTH]; static int fpool_n[FPOOL_CLASSES];
+#endif
+static size_t frame_size(CodeObj *co){
     size_t nv=(size_t)(co->nlocals+co->ncells+co->nfrees+co->stacksize);
-    size_t sz=sizeof(Frame)+sizeof(Value)*nv+sizeof(Block)*(size_t)co->nblocks;
-    Frame *f=(Frame*)xmalloc(sz); memset(f,0,sz);
+    return sizeof(Frame)+sizeof(Value)*nv+sizeof(Block)*(size_t)co->nblocks;
+}
+static void frame_free(Frame *f){
+#if !defined(PPY_LOWMEM)
+    size_t c=(frame_size(f->code)+63)>>6;
+    if(c<FPOOL_CLASSES && fpool_n[c]<FPOOL_DEPTH){ fpool[c][fpool_n[c]++]=f; return; }
+#endif
+    free(f);
+}
+Frame *frame_new(CodeObj *co, FuncObj *fn, DictObj *globals, DictObj *locals){
+    size_t sz=frame_size(co); Frame *f;
+#if !defined(PPY_LOWMEM)
+    size_t c=(sz+63)>>6;
+    if(c<FPOOL_CLASSES && fpool_n[c]) f=(Frame*)fpool[c][--fpool_n[c]];
+    else f=(Frame*)xmalloc(c<FPOOL_CLASSES ? c<<6 : sz);
+#else
+    f=(Frame*)xmalloc(sz);
+#endif
+    memset(f,0,offsetof(Frame,saved_exc));                /* (saved_exc, the stack and blocks: written before they are read) */
+    memset(f+1,0,sizeof(Value)*(size_t)(co->nlocals+co->ncells+co->nfrees));
     f->fast=(Value*)(f+1); f->cells=f->fast+co->nlocals; f->stack=f->cells+co->ncells+co->nfrees; f->blocks=(Block*)(f->stack+co->stacksize);
     f->code=co; f->func=fn; f->globals=globals; f->locals=locals; f->builtins=mp_builtins;
     f->yf=v_undef();
@@ -73,16 +98,18 @@ static void bind_args(FuncObj *fn, Value *fast, int argc, Value *argv, TupleObj 
 Value call_function(FuncObj *fn, int argc, Value *argv, TupleObj *kw, DictObj *locals){
     CodeObj *co=fn->code;
     Frame *f=frame_new(co,fn,fn->globals,locals);
-    Catch c;
-    if(!CATCH_BEGIN(c)){ bind_args(fn,f->fast,argc,argv,kw); CATCH_END(c); }
-    else { Value e=mp_catch_exc(&c); free(f); reraise(e); }
+    if(!kw && argc==co->argc && !co->kwonly && !(co->flags&(CO_VARARGS|CO_VARKW)))   /* (the arguments as they are: nothing can be wrong) */
+        memcpy(f->fast,argv,sizeof(Value)*(size_t)argc);
+    else { Catch c;
+        if(!CATCH_BEGIN(c)){ bind_args(fn,f->fast,argc,argv,kw); CATCH_END(c); }
+        else { Value e=mp_catch_exc(&c); frame_free(f); reraise(e); } }
     for(int i=0;i<co->ncells;i++) f->cells[i]=mp_cell(co->cellarg[i]>=0 ? f->fast[co->cellarg[i]] : v_undef());
     for(int i=0;i<co->nfrees;i++) f->cells[co->ncells+i]=fn->closure->items[i];
     if(co->flags&(CO_GEN|CO_CORO|CO_ASYNCGEN)) return gen_new(f,fn);
     Value r=eval(f,v_undef(),0,0);
     int dying=0;                                                     /* a generator in a local dies with the call (CPython closes it now) */
-    for(int i=0;i<co->nlocals;i++) if(mp_gen_needs_close(f->fast[i])){ dying=1; f->fast[i]=v_undef(); }
-    free(f);
+    for(int i=0;i<co->nlocals;i++){ Value v=f->fast[i]; if(v.k==V_OBJ && v.u.o->type==T_generator && mp_gen_needs_close(v)){ dying=1; f->fast[i]=v_undef(); } }
+    frame_free(f);
     if(dying){ Value keep[1]={r}; (void)keep; mp_gc_collect(); }
     return r;
 }
