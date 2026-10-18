@@ -139,7 +139,8 @@ src/
 tools/pack.c                the build's packer: plainpy.lib (Python modules without comments and
                             docstrings, the runtime routines, the C runtimes and ports; deflated), kpack
 tools/kolibrios-toolchain.sh  the i586-kolibrios cross toolchain (KolibriOS build)
-lib/*.py                    modules every program can import: kolibri (KolibriOS), machine (devices), ctypes, fastapi
+lib/                        modules every program can import: kolibri (KolibriOS), machine (devices), ctypes, fastapi,
+                            requests/ (a package: api, sessions, models, adapters, connections, auth, cookies ...)
 .github/workflows/build.yml builds, tests and releases (Linux, macOS, KolibriOS), uploads to the PPA
 .github/workflows/pages.yml the website (site/) on GitHub Pages
 debian/                     the Debian packaging Launchpad builds from (tools/launchpad.sh)
@@ -770,6 +771,61 @@ the time stamp counter (weaker: an emulator without RDRAND). `make
 test-kolibri-ssl KOS_IMG=kolibri.img` runs a compiled client and server in
 KolibriOS under QEMU against CPython's
 ([tests/run_kolibri_ssl_tests.sh](tests/run_kolibri_ssl_tests.sh)).
+
+### HTTP: `requests`
+
+[`lib/requests/`](lib/requests/__init__.py) is the API of requests 2.32 over
+`http.client` and `ssl` - in the interpreter and in compiled programs, https
+included (Linux, macOS, KolibriOS):
+
+```python
+import requests
+
+r = requests.get("https://httpbin.org/headers", timeout=10)
+r.raise_for_status()
+data: dict[str, dict[str, str]] = r.json()         # (compiled: the type r.json() is read as)
+print(r.status_code, r.headers["content-type"], data["headers"]["User-Agent"])
+
+with requests.Session() as s:                      # headers, cookies, auth, keep-alive connections
+    s.headers["Authorization"] = "Bearer TOKEN"
+    r = s.post("https://httpbin.org/post", json={"a": [1, 2]}, timeout=5)
+    print(r.status_code, r.elapsed, len(r.text))
+```
+
+`get` / `post` / `put` / `patch` / `delete` / `head` / `options` /
+`request`, `Session` (`headers`, `cookies`, `auth`, `params`, `verify`,
+`cert`, `max_redirects`, `mount`), `Request` / `PreparedRequest`
+(`Session.prepare_request`, `send`), `Response` (`status_code`, `reason`,
+`ok`, `headers` without regard to case, `content`, `text`, `encoding`,
+`json()`, `cookies`, `history`, `url`, `elapsed`, `links`, `iter_content`,
+`iter_lines`, `raise_for_status`), `params`, `data` (forms, str, bytes,
+files), `json`, `files` (multipart), `headers`, `cookies`, `auth`
+(`("user", "pass")`, `HTTPBasicAuth`, your own `AuthBase`), `timeout`
+(seconds or `(connect, read)`), `allow_redirects` (requests' rules: 302/303
+become GET, Authorization dropped for another host), `stream=True`,
+`verify` (`False`, a CA file or folder), `cert`, response `hooks`, gzip /
+deflate bodies, `requests.codes`, and requests' exceptions (`HTTPError`,
+`ConnectionError`, `Timeout`, `ConnectTimeout`, `ReadTimeout`, `SSLError`,
+`TooManyRedirects`, `JSONDecodeError`, `requests.exceptions.MissingSchema`
+...). Not here: proxies (`ProxyError`), Digest authentication, `.netrc`,
+IDNA host names, Brotli / zstd; `verify=True` is the system's certificate
+authorities (no certifi).
+
+Compiled programs: `r.json()` is `json.loads` of the type its result goes
+to (`d: dict[str, int] = r.json()`, a parameter, a return type - a
+dataclass too: its fields read from the members of those names, the others
+skipped); a dict's
+values have one type (`params={"page": "2", "q": "x"}`; `dict[str, str |
+None]` to drop a session's header); `PreparedRequest.body` is bytes (also in
+the interpreter); a `Session`'s `auth` is a `(user, password)` tuple,
+`verify` a bool and `cert` a str (a request's `auth=`, `verify=`, `cert=`
+take all of requests' kinds); the exceptions with two bases in requests have
+one: `ConnectTimeout` is a `Timeout`, `MissingSchema` / `InvalidURL` /
+`InvalidSchema` / `InvalidHeader` are `RequestException`s, and
+`requests.JSONDecodeError` is json's. `make test-requests` runs
+[tests/requests/client.py](tests/requests/client.py) against CPython's
+`http.server` (HTTP and TLS) in the interpreter and compiled: the output must
+be CPython's with the real requests ([tests/requests/client.out](tests/requests/client.out)).
 
 ### System calls: the `sys` module
 

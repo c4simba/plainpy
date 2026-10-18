@@ -76,7 +76,7 @@ int lambda_decides(AModule *m, Stmt *def, int p, Ty **at, int first){
     if(!def->annotations || p>=def->annotation_cap) return 0;
     const char *tv[8]; int n=typevars_in(m,def->annotations[p],tv,0);
     for(int i=0;i<n;i++){ int covered=0;
-        for(int q=first;q<def->param_count && q<16 && !covered;q++){ if(q==p || !at[q] || q>=def->annotation_cap) continue;
+        for(int q=first;q<def->param_count && q<AOT_MAXP && !covered;q++){ if(q==p || !at[q] || q>=def->annotation_cap) continue;
             const char *o[8]; int k=typevars_in(m,def->annotations[q],o,0);
             for(int j=0;j<k;j++) if(!strcmp(o[j],tv[i])) covered=1; }
         if(!covered) return 1; }
@@ -117,7 +117,7 @@ int method_overridden(Ck *c, AFunc *fn){
 /* a generic function's still open parameter types: copies of what this call gives (not the caller's
    own type objects, which may become optional later on: a default None of the caller's) */
 static void bind_copies(Ck *c, AFunc *g, Ty **at){
-    for(int p=0;p<g->nparams && p<16;p++) if(at[p]){ Ty *q=ty_find(g->params[p]->ty); if(q->k==TY_VAR) unify(c,q,ty_copy(at[p]));
+    for(int p=0;p<g->nparams && p<AOT_MAXP;p++) if(at[p]){ Ty *q=ty_find(g->params[p]->ty); if(q->k==TY_VAR) unify(c,q,ty_copy(at[p]));
         else if(p==g->dstar && q->k==TY_DICT && ty_find(q->elem)->k==TY_VAR) unify(c,q->elem,ty_copy(at[p]->elem)); }   /* (**kwargs: T) */
 }
 /* None, or a parameter of the function being checked that is None in it (passed on: f(x, key)) */
@@ -125,11 +125,11 @@ static int none_arg(Ck *c, Expr *a){
     if(a->kind==EXPR_NONE) return 1;
     if(a->kind!=EXPR_NAME || !c->fn || !c->fn->def) return 0;
     Stmt *def=c->fn->def;
-    for(int q=0;q<def->param_count && q<16;q++) if(!strcmp(def->params[q],a->name)){
+    for(int q=0;q<def->param_count && q<AOT_MAXP;q++) if(!strcmp(def->params[q],a->name)){
         if(c->fn->none_folded>>q&1) return 1;
         if((c->fn->origin || c->fn->pristine) && (!c->fn->cls || c->fn->origin || !method_overridden(c,c->fn)) && def->pdefaults && def->pdefaults[q] && def->pdefaults[q]->kind==EXPR_NONE && q<c->fn->nparams
            && (c->fn->none_omit>>q&1) && !(c->fn->none_given>>q&1) && ty_find(c->fn->params[q]->ty)->k==TY_VAR
-           && !stores_name(c,c->fn->body,c->fn->nbody,a->name)) return 1;      /* (a copy's parameter every call leaves out: None) */
+           && !stores_name(c,c->fn->body,c->fn->nbody,a->name)){ c->fn->none_relied|=1u<<q; return 1; }   /* (a copy's parameter every call leaves out: None) */
         return 0; }
     return 0;
 }
@@ -167,7 +167,7 @@ void pack_args(Ck *c, Expr *e, AFunc *fn, int first){
 static int none_param_ref(Ck *c, Expr *a){
     AFunc *f=c->fn;
     if(a->kind!=EXPR_NAME || !f || !f->made_for_none || !f->def) return 0;
-    for(int p=0;p<f->nparams && p<16;p++) if((f->made_for_none>>p&1) && !strcmp(f->def->params[p],a->name)) return !stores_name(c,f->body,f->nbody,a->name);
+    for(int p=0;p<f->nparams && p<AOT_MAXP;p++) if((f->made_for_none>>p&1) && !strcmp(f->def->params[p],a->name)) return !stores_name(c,f->body,f->nbody,a->name);
     return 0;
 }
 /* [], {}, set(), list(), dict(), tuple(), frozenset(): a container literal with nothing in it */
@@ -201,7 +201,7 @@ static void widen_picked(Ck *c, Expr *e, AFunc *fn, AFunc *g){
         if(a->akind==1||a->akind==2) return;
         if(a->akind==3){ for(int k=0;k<fn->nparams;k++) if(k!=fn->dstar && !strcmp(def->params[k],a->kw)) p=k; }
         else { p=pos; if(fn->star<0 || pos<fn->star) pos++; }
-        if(p<0 || p>=g->nparams || p>=def->param_count || p==fn->star || p==fn->dstar || p>=16) continue;
+        if(p<0 || p>=g->nparams || p>=def->param_count || p==fn->star || p==fn->dstar || p>=AOT_MAXP) continue;
         if(!def->annotations || p>=def->annotation_cap || !def->annotations[p] || !mentions_typevar(fn->mod,def->annotations[p])) continue;
         Ty *t=xinfo(a)->ty; if(!t) continue; t=ty_find(t);
         Ty *q=ty_find(g->params[p]->ty);
@@ -209,13 +209,13 @@ static void widen_picked(Ck *c, Expr *e, AFunc *fn, AFunc *g){
 }
 AFunc *pick_instance(Ck *c, Expr *e, AFunc *fn, XInfo *xi){
     if(xi->fn && (xi->fn==fn || xi->fn->origin==fn)){ widen_picked(c,e,fn,xi->fn); return xi->fn; }   /* (decided in an earlier pass) */
-    Ty *at[16]={0}, *fnarg[16]={0}; Stmt *def=fn->def; int unknown=0, lam_generic=0, first= fn->cls && !fn->is_static ? 1 : 0;   /* (a method: after self) */
+    Ty *at[AOT_MAXP]={0}, *fnarg[AOT_MAXP]={0}; Stmt *def=fn->def; int unknown=0, lam_generic=0, first= fn->cls && !fn->is_static ? 1 : 0;   /* (a method: after self) */
     pack_args(c,e,fn,first);
     unsigned given=0, fnm=0, omit=0, nonelit=0;
     for(int i=0, pos=first;i<e->count;i++){ Expr *a=e->items[i]; int p=-1;
         if(a->akind==1||a->akind==2) return fn;
         if(a->akind==3){ for(int k=0;k<fn->nparams;k++) if(k!=fn->dstar && !strcmp(def->params[k],a->kw)) p=k;
-            if(p<0 && fn->dstar>=0 && fn->dstar<16){                        /* name=value for **kwargs: its values' type decides */
+            if(p<0 && fn->dstar>=0 && fn->dstar<AOT_MAXP){                        /* name=value for **kwargs: its values' type decides */
                 Ty *vt=ty_find(ck_expr(c,a));
                 if(!ty_known(vt)){ unknown=1; continue; }
                 Ty *prev=at[fn->dstar];
@@ -223,7 +223,7 @@ AFunc *pick_instance(Ck *c, Expr *e, AFunc *fn, XInfo *xi){
                 at[fn->dstar]=ty_dict(TY_STR_T,vt); given|=1u<<fn->dstar; continue; } }
         else { p=pos; if(fn->star<0 || pos<fn->star) pos++; }               /* (positional ones past *args: its items) */
         if(p==fn->star && fn->star>=0){ ck_expr(c,a); continue; }           /* (*args: one item type, not part of the choice) */
-        if(p<0 || p>=fn->nparams || p==fn->dstar || p>=16) return fn;
+        if(p<0 || p>=fn->nparams || p==fn->dstar || p>=AOT_MAXP) return fn;
         if(fn->defaults[p] && fn->defaults[p]->kind==EXPR_NONE && none_arg(c,a)){ ck_expr(c,a); continue; }   /* None given: as if left out */
         given|=1u<<p;
         if(a->kind==EXPR_NAME && !lookup(c,a->name) && def){                /* accumulate(xs, max): max as a function of the arguments the body gives it */
@@ -231,18 +231,18 @@ AFunc *pick_instance(Ck *c, Expr *e, AFunc *fn, XInfo *xi){
         at[p]=ty_find(ck_expr(c,a));
         if(c->defaulting && !ty_known(at[p]) && empty_container(a)){ default_elems(at[p]); at[p]=ty_find(at[p]); }   /* (set(), [] that nothing else decides) */
         if(c->defaulting && !ty_known(at[p]) && only_none_unknown(at[p])){ default_none_vars(at[p]); at[p]=ty_find(at[p]); }   /* ((1, None): its None an Optional[int]) */
-        if(p<16 && (a->kind==EXPR_NONE || none_param_ref(c,a))) nonelit|=1u<<p;   /* (None, or a parameter of a copy made for None) */
+        if(p<AOT_MAXP && (a->kind==EXPR_NONE || none_param_ref(c,a))) nonelit|=1u<<p;   /* (None, or a parameter of a copy made for None) */
         if(fn->defaults[p] && fn->defaults[p]->kind==EXPR_NONE && (at[p]->k==TY_FUNC || a->kind==EXPR_LAMBDA)) fnm|=1u<<p;   /* (key=f where key=None) */
         if(!ty_known(at[p]) || at[p]->k==TY_VOID){ if(a->kind!=EXPR_LAMBDA && at[p]->k!=TY_FUNC) unknown=1; if(at[p]->k==TY_FUNC) fnarg[p]=at[p]; at[p]=NULL; }   /* (not known yet: any; a function's
                                                                                    parameters may be what this call decides) */
         if(a->kind==EXPR_LAMBDA && def) lam_generic|=1<<p;
     }
-    for(int p=first;p<fn->nparams && p<16;p++){                              /* a constant default left to it: its type (f(x: T = 0)) */
+    for(int p=first;p<fn->nparams && p<AOT_MAXP;p++){                              /* a constant default left to it: its type (f(x: T = 0)) */
         Expr *d=fn->defaults[p];
         if(!(given>>p&1) && p!=fn->star && p!=fn->dstar && d && d->kind==EXPR_NONE) omit|=1u<<p;
         if((given>>p&1) || p==fn->star || p==fn->dstar || !d || !const_default(d) || d->kind==EXPR_NONE) continue;
         AModule *save=c->mod; c->mod=fn->mod; at[p]=ty_find(ck_default(c,d)); c->mod=save; }
-    if(lam_generic){ int any=0; for(int p=0;p<16;p++) if((lam_generic>>p&1) && lambda_decides(fn->mod,def,p,at,first)) any=1; lam_generic=any; }
+    if(lam_generic){ int any=0; for(int p=0;p<AOT_MAXP;p++) if((lam_generic>>p&1) && lambda_decides(fn->mod,def,p,at,first)) any=1; lam_generic=any; }
     if(unknown && !c->strict && !(nonelit && c->defaulting)) return NULL;                                     /* (decided once the arguments are known) */
     if(lam_generic && !unknown){                                           /* f(buf, lambda b: (...)) for f(b: bytes, g: Callable[[bytes], T]) -> T: */
         const char *h=instantiate(c,fn);                                   /* what T is comes from the lambda: a copy for this call */
@@ -251,7 +251,7 @@ AFunc *pick_instance(Ck *c, Expr *e, AFunc *fn, XInfo *xi){
         g->none_omit=omit; g->none_fn=fnm; g->none_given=given;
         c->changed=1; xi->fn=g;
         return g; }
-    { int any=0; for(int p=0;p<16;p++) if(at[p]) any=1;
+    { int any=0; for(int p=0;p<AOT_MAXP;p++) if(at[p]) any=1;
       if(!any && !(nonelit && c->defaulting) && !((fn->none_omit&fnm)||(fn->none_fn&omit)||(fn->none_folded&given))){ if(c->strict||!e->count||!unknown){ fn->direct=1; none_use(c,fn,omit,fnm,given,e->line); return fn; } return NULL; } }   /* nothing known yet: wait (in the end, or with only lambdas: the function itself) */
     c->none_lit=nonelit;
     AFunc *g=instance_for_none(c,fn,at,fnarg,omit,fnm,given,e->line);
@@ -276,8 +276,9 @@ static int generic_param(AFunc *fn, int p){
 AFunc *instance_for_none(Ck *c, AFunc *fn, Ty **at, Ty **fnarg, unsigned omit, unsigned fnm, unsigned gv, int line){
     for(int k=-1;k<fn->ninsts;k++){ AFunc *cand=k<0?fn:fn->insts[k]; int ok=1;
         if((cand->none_omit&fnm) || (cand->none_fn&omit) || (cand->none_folded&gv)) continue;   /* (a copy where it is always None) */
-        for(int p=0;p<fn->nparams && p<16 && ok;p++){ Ty *q=ty_find(cand->params[p]->ty);
-            if(at[p] && p==fn->dstar && q->k==TY_DICT){ Ty *qe=ty_find(q->elem); if(qe->k!=TY_VAR && !ty_same(qe,at[p]->elem)) ok=0; }   /* (**kwargs: T) */
+        for(int p=0;p<fn->nparams && p<AOT_MAXP && ok;p++){ Ty *q=ty_find(cand->params[p]->ty);
+            if(at[p] && p!=fn->dstar && (cand->none_relied>>p&1)) ok=0;   /* (a copy that passed p on as left out is not one for a value of p) */
+            else if(at[p] && p==fn->dstar && q->k==TY_DICT){ Ty *qe=ty_find(q->elem); if(qe->k!=TY_VAR && !ty_same(qe,at[p]->elem)) ok=0; }   /* (**kwargs: T) */
             else if(!at[p] && ((c->none_lit>>p&1) || ((omit>>p&1) && generic_param(fn,p))) && !q->opt && (q->k==TY_LIST||q->k==TY_DICT||q->k==TY_SET||q->k==TY_TUPLE||q->k==TY_STR||q->k==TY_BYTES
                     ||q->k==TY_INT||q->k==TY_FLOAT||q->k==TY_BOOL||q->k==TY_OBJ)) ok=0;    /* (None given or left out: not a copy for values that are never None) */
             else if(at[p]){ if(q->k!=TY_VAR && !ty_same(q,at[p])) ok=0;

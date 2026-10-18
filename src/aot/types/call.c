@@ -228,6 +228,13 @@ Ty *ck_call_inner(Ck *c, Expr *e){
             Expr *mode=NULL; int pos=0;
             for(int i=0;i<e->count;i++){ Expr *a=e->items[i]; if(!a->akind){ if(pos==1) mode=a; pos++; } else if(a->akind==3 && !strcmp(a->kw,"mode")) mode=a; }
             if(mode && mode->kind==EXPR_LITERAL && mode->tok->kind==T_STRING && strchr(mode->tok->text,'w')){ f->name="_open_w"; m=f->name; } }
+        if(!strcmp(m,"json") && aot_find_method(t->cls,"_to_json")){        /* r.json() of a class with _to_json() -> JSON text (requests'
+                                                                             Response): json.loads(r._to_json()), the value of the type wanted */
+            if(e->count) ck_err(c,e->line,"%s.json() takes no arguments in compiled code",t->cls->name);
+            Expr *tj=xnew(EXPR_CALL,e->line); tj->a=f; f->name="_to_json";
+            if(!module_sym(c->mod," json.loads")) symtab_add(&c->mod->syms," json.loads",AS_SYS,(void*)"json.loads");
+            e->a=name_expr(module_sym(c->mod," json.loads")->name,e->line); xpush(e,tj);
+            return ck_json_loads(c,e); }
         AFunc *fn=aot_find_method(t->cls,m);
         if(!fn && (!strcmp(m,"assertIsInstance")||!strcmp(m,"assertNotIsInstance")) && aot_find_method(t->cls,"_isInstance")){
             /* self.assertIsInstance(obj, C, msg): self._isInstance(isinstance(obj, C), obj, "<class 'C'>", msg) */

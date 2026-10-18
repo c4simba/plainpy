@@ -1,0 +1,75 @@
+<Response [200]> 200 OK True True utf-8 http://127.0.0.1:PORT/get?q=a+b&n=1
+application/json True None dflt
+  method='GET', path='/get', args='q=a b&n=1', x-test='yes', accept-encoding='gzip, deflate', body=''
+True True http://127.0.0.1:PORT/get?q=a+b&n=1 GET yes
+True [] False {}
+  args='x=0&a=1&a=2'
+  args='raw=yes&z='
+  args='multi=1&multi=2'
+  method='POST', content-type='application/x-www-form-urlencoded', content-length='12', body='k=v&e=%C3%A9'
+  content-type='application/json', body='{"a": [1, 2], "b": "x"}'
+  method='PUT', content-type='', body='plain text'
+  method='PATCH', content-length='4'
+  method='DELETE', content-length='0', body=''
+  content-length='0'
+head 200 b'' application/json
+options 200
+  method='PATCH', body='x=1'
+  content-type='multipart/form-data; boundary=BOUNDARY', body='--BOUNDARY\r\nContent-Disposition: form-data; name="field"\r\n\r\nvalue\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="f"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--BOUNDARY--\r\n'
+  body='--BOUNDARY\r\nContent-Disposition: form-data; name="g"; filename="g"\r\n\r\nraw bytes\r\n--BOUNDARY--\r\n'
+200 ok True ''
+204 ok True ''
+404 HTTPError: 404 Client Error: Not Found for url: http://127.0.0.1:PORT/status/404 404
+500 HTTPError: 500 Server Error: Internal Server Error for url: http://127.0.0.1:PORT/status/500 500
+200 404 418 201
+redirect 200 http://127.0.0.1:PORT/get [302, 302, 302] ['http://127.0.0.1:PORT/redirect/3', 'http://127.0.0.1:PORT/redirect/2', 'http://127.0.0.1:PORT/redirect/1']
+not followed 302 True /redirect/1 []
+  method='POST', body='keep=me'
+  method='GET', body='', content-type=''
+  method='GET'
+  authorization='Basic dTpw'
+  authorization=''
+TooManyRedirects: Exceeded 2 redirects.
+  cookie='a=1; b=2'
+multi ['m1', 'm2'] one a, b 2
+  cookie='sess=abc; k=v'
+jar ['k', 'sess'] abc True v
+  cookie='sess=abc; k=v'
+  cookie='sess=abc; k=v; extra=1'
+  cookie='k=v'
+after delete ['k']
+  x-test='session', args='from=session&q=1', authorization='Basic dXNlcjpwYXNz'
+  x-test='request'
+same connection True
+  x-test=''
+application/json application/json
+basic 200 yes al
+wrong 401 Basic realm="Fake Realm"
+in url 200
+gzip yes gzip
+deflate yes
+lines [b'line 0', b'line 1', b'line 2', b'line 3', b'line 4']
+chunks [256, 256, 256, 232]
+bytes 300 b'\x00\x01\x02\x03' b'*+' 3
+text 'line 0\nline 1\nline 2\n'
+with 200 b'line 0\nline 1\n'
+latin1 iso-8859-1 <p>café</p>
+as utf-8 '<p>caf�</p>'
+links https://x.test/p2 last
+numbers [1, 2] 3
+JSONDecodeError
+MissingSchema: Invalid URL '127.0.0.1/x': No scheme supplied. Perhaps you meant https://127.0.0.1/x?
+InvalidURL: Invalid URL 'http:///x': No host supplied
+InvalidSchema: No connection adapters were found for 'gopher://x/'
+ConnectionError
+ReadTimeout
+Timeout
+InvalidHeader: Invalid leading whitespace, reserved character(s), or return character(s) in header value: 'x\r\ny'
+https 200 https://localhost:TPORT/get?over=tls
+  args='over=tls'
+unverified 200
+SSLError (system CAs)
+tls session POST {"t": 1} True
+<Request [POST]> <PreparedRequest [POST]> POST http://127.0.0.1:PORT/post application/x-www-form-urlencoded
+  method='POST', x-test='prep', body='p=q'
+http://127.0.0.1:PORT/get?x=1 True

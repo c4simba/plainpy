@@ -150,8 +150,8 @@ Ty *type_of(Ck *c, Expr *e, int line){
             ck_err(c,line,"Callable needs its parameter and result types: Callable[[int, str], bool]");
         if(targ->kind==EXPR_LIST || targ->count<2) ck_err(c,line,"Callable needs a result type: Callable[[int], int]");
         if(targ->count>2) ck_err(c,line,"expected ']' in Callable");
-        Expr *pl=targ->items[0]; Ty *ps[16]; int np=0;
-        for(int k=0;k<pl->count;k++){ if(np==16) ck_err(c,line,"too many parameters"); ps[np++]=type_of(c,pl->items[k],line); }
+        Expr *pl=targ->items[0]; Ty *ps[AOT_MAXP]; int np=0;
+        for(int k=0;k<pl->count;k++){ if(np==AOT_MAXP) ck_err(c,line,"too many parameters"); ps[np++]=type_of(c,pl->items[k],line); }
         return ty_func(ps,np,type_of(c,targ->items[1],line));
     }
     Ty *args[16]={NULL}; int nargs=0, varlen=0;

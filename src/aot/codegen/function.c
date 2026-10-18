@@ -73,7 +73,7 @@ void emit_function(AFunc *fn){
     F *f=PPY_NEW0(F); f->fn=fn; f->lret=new_label();
     f->ret=fn->is_gen ? TY_VOID_T : fn->ret;
     cg_path=fn->mod->unit->path?fn->mod->unit->path:fn->mod->name;
-    int off=8, argpos[16];
+    int off=8, argpos[AOT_MAXP];
     for(int i=0;i<fn->nparams;i++){ fn->params[i]->offset=argpos[i]=off; off+=esize(fn->params[i]->ty); }
     int argbytes=off-8;
     if(fn->ncaps || (fn->outer && dyn_defaults(fn))){ layout_caps(fn); f->env=frame_slot(f,4); }
@@ -161,7 +161,7 @@ int adapter_index(Ty *to, Ty *from){
 void emit_adapter(int k){
     Ty *to=gg->adapters[k].to, *from=gg->adapters[k].from;
     F ff; memset(&ff,0,sizeof ff); F *f=&ff;
-    int star=1, dstar=(from->tup>>1)&1, nreg=from->nelems-star-dstar, toff[16], foff[17], tot=0, a=8;
+    int star=1, dstar=(from->tup>>1)&1, nreg=from->nelems-star-dstar, toff[AOT_MAXP], foff[AOT_MAXP+1], tot=0, a=8;
     for(int i=0;i<to->nelems;i++){ toff[i]=a; a+=esize(to->elems[i]); }
     for(int i=0;i<from->nelems;i++){ foff[i]=tot; tot+=i<nreg?esize(from->elems[i]):4; }
     Ty *sel=from->elems[nreg];

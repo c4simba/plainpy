@@ -96,7 +96,7 @@ int static_none_param(Ck *c, Expr *e){
     Stmt *def=c->fn->def; int p=-1;
     for(int i=0;i<def->param_count;i++) if(!strcmp(def->params[i],a->name)) p=i;
     if(p<0 || !def->pdefaults || !def->pdefaults[p] || def->pdefaults[p]->kind!=EXPR_NONE || p>=c->fn->nparams) return -1;
-    if(p<16 && (!c->fn->cls || c->fn->origin || !method_overridden(c,c->fn)) && (c->fn->origin || c->fn->pristine) && !stores_name(c,c->fn->body,c->fn->nbody,a->name)){   /* (a generic method: called through pick_instance) */
+    if(p<AOT_MAXP && (!c->fn->cls || c->fn->origin || !method_overridden(c,c->fn)) && (c->fn->origin || c->fn->pristine) && !stores_name(c,c->fn->body,c->fn->nbody,a->name)){   /* (a generic method: called through pick_instance) */
         if((c->fn->none_omit>>p&1) && !(c->fn->none_given>>p&1)){      /* every call of this copy leaves it out */
             Ty *t=ty_find(c->fn->params[p]->ty);
             if(t->k==TY_VAR) unify(c,t,optional(TY_INT_T));

@@ -64,7 +64,7 @@ static int kd_method_ok(AFunc *m, int nparams){
 /* the None arguments of a kind method's parameters after the first n (pushed before the others) */
 static const char *kd_nones(AFunc *m, int n){
     static char b[4][160]; static int k; char *o=b[k++&3]; o[0]=0;
-    for(int i=n;i<m->nparams && i<16;i++) strcat(o,"        push 0\n");
+    for(int i=n;i<m->nparams && i<AOT_MAXP;i++) strcat(o,"        push 0\n");
     return o;
 }
 const char *class_kd(AClass *c){

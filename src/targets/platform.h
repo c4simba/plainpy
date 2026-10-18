@@ -57,16 +57,26 @@ void _dual_printf(const char *fmt, ...);
 #undef printf
 #define printf(...) _dual_printf(__VA_ARGS__)
 
-/* Page allocator over f68.12/f68.13 (libc malloc crashes without TLS setup).
-   Every block carries a 16-byte header (magic + usable size) so realloc copies
-   exactly the old contents (not the larger new size, which used to overread the
-   old block and fault) and free can hand the pages back. Defined in startup.c. */
+/* The allocator over f68.12/f68.13 (libc malloc crashes without TLS setup): size
+   classes carved out of big chunks for blocks up to 2 KB, a 68.12 block of its own
+   for a bigger one. Every block carries a 16-byte header (magic, class, size) so
+   realloc copies exactly the old contents and free puts the block back. Defined in
+   startup.c. */
 void *kos_malloc(size_t n);
+void *kos_calloc(size_t n, size_t size);
 void *kos_realloc(void *p, size_t n);
 void  kos_free(void *p);
 #define malloc(n)    kos_malloc(n)
+#define calloc(n,s)  kos_calloc(n,s)
 #define realloc(p,n) kos_realloc(p,n)
 #define free(p)      kos_free(p)
+
+/* The toolchains' newlib printf has no long long (%lld: the low half, and the arguments
+   after it shifted): plainpy's own snprintf / vsnprintf, targets/kolibri/format.c. */
+int ppy_vsnprintf(char *out, size_t n, const char *fmt, va_list ap);
+int ppy_snprintf(char *out, size_t n, const char *fmt, ...);
+#define vsnprintf ppy_vsnprintf
+#define snprintf  ppy_snprintf
 
 #endif /* PPY_KOLIBRI */
 

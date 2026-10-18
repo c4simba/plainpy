@@ -343,6 +343,7 @@ void mp_object_methods_init(void){
     { Value is=mp_native("__init_subclass__",o_init_subclass); BoxObj *cm=(BoxObj*)mp_alloc(T_classmethod,sizeof(BoxObj)); cm->v=is; mp_dict_set(t->dict,mp_intern("__init_subclass__"),v_obj(cm)); }
     t=E_BaseException;
     mp_type_add(t,"__init__",e_init); mp_type_add(t,"__str__",e_str); mp_type_add(t,"__repr__",e_repr); mp_type_add(t,"with_traceback",e_with_tb); mp_type_add(t,"add_note",e_add_note);
+    mp_type_add(E_OSError,"__init__",e_init);              /* (its own, as CPython's: super().__init__() of an OSError subclass mixed with another stops there) */
     mp_type_add(T_property,"__init__",p_init); mp_type_add(T_staticmethod,"__init__",box_init); mp_type_add(T_classmethod,"__init__",box_init);
     t=T_property; mp_type_add(t,"getter",p_getter); mp_type_add(t,"setter",p_setter); mp_type_add(t,"deleter",p_deleter); mp_type_add(t,"__get__",p_get); mp_type_add(t,"__set__",p_set);
     mp_type_add(T_type,"__subclasses__",t_subclasses);

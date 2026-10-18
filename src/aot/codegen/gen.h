@@ -77,7 +77,7 @@ typedef struct F {
     int *refs; int nrefs, crefs;/* every reference slot: released when the function returns */
     Loop loops[64]; int nloops;
     int lret;
-    char param_stored[16];      /* parameter assigned in the body: the function takes its own reference */
+    char param_stored[AOT_MAXP];      /* parameter assigned in the body: the function takes its own reference */
     TryCtx tries[32]; int ntries;
     int excs[32]; int nexcs;    /* slots of the exceptions being handled (bare raise) */
     int env;                    /* frame slot of its closure (edx at entry); 0 without captures */

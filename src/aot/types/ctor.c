@@ -25,7 +25,7 @@ Ty *ck_callval(Ck *c, Expr *e, Ty *ft){
     if(ft->k==TY_TYPE) return ck_typecall(c,e,ft);
     if(ft->k==TY_VAR){                                  /* fn(x) of an unknown fn: it takes these arguments */
         for(int i=0;i<e->count;i++) if(e->items[i]->akind){ for(int k=0;k<e->count;k++) ck_expr(c,e->items[k]); return pending(c,e->line,"the called function"); }
-        Ty *ps[16]; if(e->count>16) ck_err(c,e->line,"too many arguments");
+        Ty *ps[AOT_MAXP]; if(e->count>AOT_MAXP) ck_err(c,e->line,"too many arguments");
         for(int i=0;i<e->count;i++) ps[i]=ty_var();
         Ty *nf=ty_func(ps,e->count,ty_var()); unify(c,ft,nf); ft=nf;
     }
@@ -35,7 +35,7 @@ Ty *ck_callval(Ck *c, Expr *e, Ty *ft){
     if(ft->k!=TY_FUNC) ck_err(c,e->line,"%s is not callable",ty_name(ft));
     int star=ft->tup&1, dstar=(ft->tup>>1)&1, nreg=ft->nelems-star-dstar;
     Ty *starel=star?ft->elems[nreg]:NULL, *kwel=dstar?ft->elems[nreg+star]:NULL;
-    for(int i=0;i<16;i++){ xi->argmap[i]=-1; xi->argelem[i]=0; }
+    for(int i=0;i<AOT_MAXP;i++){ xi->argmap[i]=-1; xi->argelem[i]=0; }
     xi->nxargs=0; xi->nkwargs=0; xi->splat=0; xi->dsplat=0; xi->emptysplat=0;
     int pi=0;
     #define TOO_MANY() ck_err(c,e->line,"this function takes %d positional argument%s",nreg,nreg==1?"":"s")
@@ -93,27 +93,27 @@ static AClass *pick_class_instance(Ck *c, Expr *e, AClass *cls, XInfo *xi){
         xi->icls=NULL; }                                                    /* (chosen before its types were bound: again) */
     AFunc *init=aot_find_method(cls,"__init__");
     if(!init || init->cls!=cls || class_has_subclass(c,cls)) return cls;
-    Ty *at[16]={0}; Stmt *def=init->def; int unknown=0, lam_generic=0;
+    Ty *at[AOT_MAXP]={0}; Stmt *def=init->def; int unknown=0, lam_generic=0;
     for(int i=0, pos=1;i<e->count;i++){ Expr *a=e->items[i]; int p=-1;
         if(a->akind==1||a->akind==2) return cls;
         if(a->akind==3){ for(int k=1;k<init->nparams;k++) if(!strcmp(def->params[k],a->kw)) p=k; }
         else p=pos++;
-        if(p<1 || p>=init->nparams || p==init->star || p==init->dstar || p>=16) return cls;
+        if(p<1 || p>=init->nparams || p==init->star || p==init->dstar || p>=AOT_MAXP) return cls;
         if(a->kind==EXPR_NAME && def->annotations && p<def->annotation_cap){ int ar=ann_callable_arity(def->annotations[p]); if(ar>=0) builtin_fn_value(c,a,ar); }   /* defaultdict(list) */
         at[p]=ty_find(ck_expr(c,a));
         if(!ty_known(at[p]) || at[p]->k==TY_VOID){ at[p]=NULL; if(a->kind!=EXPR_LAMBDA) unknown=1; }   /* (a lambda's types come from the instance) */
         if(a->kind==EXPR_LAMBDA) lam_generic|=1<<p; }
     if(unknown && !c->strict) return NULL;                                     /* (decided once the arguments are known) */
-    if(lam_generic){ int any=0; for(int p=1;p<16;p++) if((lam_generic>>p&1) && lambda_decides(cls->mod,def,p,at,1)) any=1; lam_generic=any; }
+    if(lam_generic){ int any=0; for(int p=1;p<AOT_MAXP;p++) if((lam_generic>>p&1) && lambda_decides(cls->mod,def,p,at,1)) any=1; lam_generic=any; }
     if(lam_generic){ AClass *k=class_instance(c,cls); k->bare=1; xi->icls=k; return k; }   /* what T is comes from a lambda: a copy for this call */
-    { int any=0, decides=0; for(int p=0;p<16;p++) if(at[p]){ any=1; Expr *an=def->annotations && p<def->annotation_cap ? def->annotations[p] : NULL;
+    { int any=0, decides=0; for(int p=0;p<AOT_MAXP;p++) if(at[p]){ any=1; Expr *an=def->annotations && p<def->annotation_cap ? def->annotations[p] : NULL;
           if(!an || mentions_typevar(cls->mod,an) || (cls->def && mentions_name_of(an,cls->def->tparams,cls->def->ntparams))) decides=1; }   /* (an untyped one may: through the body) */
       if((!any && !e->count) || (any && !decides && !unknown && cls->def && cls->def->ntparams)){ AClass *k=class_instance(c,cls); k->bare=1; xi->icls=k; return k; }   /* Box(), Queue(maxsize=2): an instance of
                                                                                its own (what it holds: from its uses) */
       if(!any) return c->strict ? cls : NULL; }
     for(int k=-1;k<cls->ninsts;k++){ AClass *cand=k<0?cls:cls->insts[k]; AFunc *ci=aot_find_method(cand,"__init__"); int ok=1;
         if(cand->bare) continue;
-        for(int p=1;p<ci->nparams && p<16 && ok;p++) if(at[p]){ Ty *q=ty_find(ci->params[p]->ty); if(q->k!=TY_VAR && !ty_same(q,at[p])) ok=0; }
+        for(int p=1;p<ci->nparams && p<AOT_MAXP && ok;p++) if(at[p]){ Ty *q=ty_find(ci->params[p]->ty); if(q->k!=TY_VAR && !ty_same(q,at[p])) ok=0; }
         if(ok){ xi->icls=cand; return cand; } }
     AClass *k=class_instance(c,cls); xi->icls=k;
     return k;

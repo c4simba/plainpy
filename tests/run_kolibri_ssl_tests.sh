@@ -24,7 +24,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/hd"
 if [ -n "$KOS_PLAINPY" ]; then
     cp "$KOS_PLAINPY/plainpy" "$KOS_PLAINPY/plainpy.lib" tests/ssl/kolibri.py "$OUT/hd/"
-    mkdir -p "$OUT/hd/lib" && cp lib/*.py "$OUT/hd/lib/"
+    mkdir -p "$OUT/hd/lib" && cp -R lib/. "$OUT/hd/lib/"
     run='/hd0/1/plainpy /hd0/1/kolibri.py'
     mode=interpreter
 else

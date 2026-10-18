@@ -82,7 +82,7 @@ static void gen_call_args(F *f, AFunc *fn, Expr *e, XInfo *xi, int *off, int fir
    env: the closure of a nested function (NULL: none, or the current one if it calls itself) */
 static void call_user(F *f, AFunc *fn, Expr *e, XInfo *xi, int self_kind){
     use_fn(fn);
-    int off[16], total=0;
+    int off[AOT_MAXP], total=0;
     for(int i=0;i<fn->nparams;i++){ off[i]=total; total+=esize(fn->params[i]->ty); }
     if(total) E(f,"sub esp,%d",total);
     if(self_kind==1){ gen_borrow(f,e->a->a); E(f,"mov [esp],eax"); }
@@ -105,9 +105,9 @@ static void call_user(F *f, AFunc *fn, Expr *e, XInfo *xi, int self_kind){
    parameters: the regular ones, then *args (a tuple) and **kwargs (a dict).
    With dv: a decorated method obj.m(args) -> dv(obj, args). */
 static int call_value_of(F *f, Expr *e, AVar *dv){
-    Ty *ft=dv?ty_find(dv->ty):TY(e->a); int cs=frame_slot(f,4), off[17], total=0;
+    Ty *ft=dv?ty_find(dv->ty):TY(e->a); int cs=frame_slot(f,4), off[AOT_MAXP+1], total=0;
     int star=ft->tup&1, dstar=(ft->tup>>1)&1, nreg=ft->nelems-star-dstar, skip=dv?1:0;
-    AFunc pseudo; memset(&pseudo,0,sizeof pseudo); AVar pv[16], *pp[16]; Expr *nodef[16]={NULL};
+    AFunc pseudo; memset(&pseudo,0,sizeof pseudo); AVar pv[AOT_MAXP], *pp[AOT_MAXP]; Expr *nodef[AOT_MAXP]={NULL};
     for(int i=0;i<ft->nelems;i++){
         Ty *pt;
         if(i<nreg) pt=ft->elems[i];
@@ -181,7 +181,7 @@ int gen_ctor(F *f, Expr *e, XInfo *xi){
         if(raw_message(e->count?e->items[0]:NULL,cls)) E(f,"mov dword [eax+%d],1",exc_rawoff(cls));
         return 1;
     }
-    int off[16], total=0;
+    int off[AOT_MAXP], total=0;
     if(init){ use_fn(init); for(int i=0;i<init->nparams;i++){ off[i]=total; total+=esize(init->params[i]->ty); } }
     if(total) E(f,"sub esp,%d",total);
     if(init) gen_call_args(f,init,e,xi,off,1);

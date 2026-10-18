@@ -220,7 +220,7 @@ Ty *ck_expr_inner(Ck *c, Expr *e){
               if(m){                                               /* obj.method as a value: bound to obj */
                   if(m->is_static){ xi->kind=X_FUNCREF; xi->fn=m; m->value_used=1; return fn_type(c,m,e->line); }
                   if(m->decovar || m->star>=0 || m->dstar>=0 || m->kwonly<m->nparams || m->is_async) ck_err(c,e->line,"method %s.%s cannot be used as a value in compiled code (call it)",t->cls->name,e->name);
-                  Ty *ps[16]; for(int i=1;i<m->nparams;i++) ps[i-1]=m->params[i]->ty;
+                  Ty *ps[AOT_MAXP]; for(int i=1;i<m->nparams;i++) ps[i-1]=m->params[i]->ty;
                   xi->kind=X_BOUND; xi->fn=m; xi->cls=t->cls; m->value_used=1;
                   return ty_func(ps,m->nparams-1,m->ret); } }
             if(c->strict) ck_err(c,e->line,"%s has no attribute '%s'",t->cls->name,e->name);

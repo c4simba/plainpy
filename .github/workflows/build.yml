@@ -61,6 +61,8 @@ jobs:
         run: make test-port
       - name: TLS (ssl over OpenSSL 3) against CPython's
         run: TARGET=${{ matrix.arch == 'x86_64' && 'linux' || 'none' }} make test-ssl
+      - name: requests (lib/requests) against CPython's http.server
+        run: TARGET=${{ matrix.arch == 'x86_64' && 'linux' || 'none' }} make test-requests
       - name: Bytecode files
         run: make test-bytecode
       - name: Packages
@@ -102,6 +104,8 @@ jobs:
         run: |
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
           make test-ssl
+      - name: requests (lib/requests) against CPython's http.server
+        run: make test-requests
       - name: Bytecode files
         run: make test-bytecode
       - name: Tarball

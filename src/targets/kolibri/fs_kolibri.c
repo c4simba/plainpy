@@ -48,7 +48,8 @@ static int kos_read_file(const char *path, void *buf, int size, int pos_lo, int 
         : "a"(70), "b"((int)bi)
         : "memory");
 
-    if(result != 0 && result != 6) return result; /* 6 = EOF */
+    if(result != 0 && result != 6) return -result; /* (f70's error: 5 no such file ... - negative, so no caller
+                                                      takes it for a count of bytes read; 6 = EOF) */
     return size; /* actual bytes read */
 }
 

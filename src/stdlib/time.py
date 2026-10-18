@@ -1490,18 +1490,17 @@ if not sys._compiled:                   # (the interpreter: the most used in C, 
     _ppy_time._struct = struct_time     # (kept alive where the collector sees it)
     _make = _ppy_time.make
 
-    if sys.platform != "kolibrios":     # (KolibriOS's clocks: the functions above)
-        _clock = _ppy_time.clock
-        time = _ppy_time.time
-        time_ns = _ppy_time.time_ns
-        monotonic = _ppy_time.monotonic
-        monotonic_ns = _ppy_time.monotonic_ns
-        perf_counter = _ppy_time.perf_counter
-        perf_counter_ns = _ppy_time.perf_counter_ns
-        process_time = _ppy_time.process_time
-        process_time_ns = _ppy_time.process_time_ns
-        thread_time = _ppy_time.thread_time
-        thread_time_ns = _ppy_time.thread_time_ns
+    _clock = _ppy_time.clock            # (KolibriOS's: _kns, _kwall and _clock's way)
+    time = _ppy_time.time
+    time_ns = _ppy_time.time_ns
+    monotonic = _ppy_time.monotonic
+    monotonic_ns = _ppy_time.monotonic_ns
+    perf_counter = _ppy_time.perf_counter
+    perf_counter_ns = _ppy_time.perf_counter_ns
+    process_time = _ppy_time.process_time
+    process_time_ns = _ppy_time.process_time_ns
+    thread_time = _ppy_time.thread_time
+    thread_time_ns = _ppy_time.thread_time_ns
 
 
 if not sys._compiled:                   # (CPython's are C functions: Formatter.converter = time.gmtime is not a method)

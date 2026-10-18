@@ -61,9 +61,9 @@ void emit_task_stub(int i){
 void gen_task_new(F *f, Expr *call){
     XInfo *xi=xinfo(call); AFunc *fn=xi->fn;
     if(fn->star>=0||fn->dstar>=0) cg_fail(call->line,"coroutines with *args/**kwargs are not supported in compiled code");
-    for(int i=0;i<16;i++) if(xi->argelem[i]) cg_fail(call->line,"f(*seq) of a coroutine is not supported in compiled code");
+    for(int i=0;i<AOT_MAXP;i++) if(xi->argelem[i]) cg_fail(call->line,"f(*seq) of a coroutine is not supported in compiled code");
     int self_kind=xi->kind==X_METHOD&&!fn->is_static ? 1 : xi->kind==X_SUPER&&!fn->is_static ? 2 : 0;
-    int off[16], total=0;
+    int off[AOT_MAXP], total=0;
     for(int i=0;i<fn->nparams;i++){ off[i]=total; total+=esize(fn->params[i]->ty); }
     int ts=task_stub(fn,self_kind==1&&fn->overridden);
     E(f,"mov eax,%d",total); E(f,"mov edx,%s",fnl(gg->stubs[ts].fn,gg->stubs[ts].virt?LB_VTASK:LB_TASK)); CALLRT(f,"rt_task_new");

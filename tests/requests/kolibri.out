@@ -1,0 +1,16 @@
+get: 200 OK from=kolibrios kos application/json
+post json: application/json {"a": [1, 2], "k": "v"}
+post form: field=value
+redirect: 200 [302, 302]
+HTTPError: 404 Client Error: Not Found for url: http://10.0.2.2:PORT/status/404
+cookies: kos=1 {'kos': '1'}
+keep-alive: True
+gzip: yes
+lines: [b'line 0', b'line 1', b'line 2']
+auth: 200
+timeout: ReadTimeout
+https: over=tls
+https session: POST tls body True
+host name: SSLError
+no CAs: SSLError
+done

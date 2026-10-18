@@ -99,7 +99,7 @@ void ck_args(Ck *c, Expr *e, AFunc *fn, int skip, XInfo *xi){
     int np=fn->nparams, pi=skip;
     int poslimit=fn->star>=0?fn->star:fn->kwonly<np?fn->kwonly:fn->dstar>=0?fn->dstar:np;
     fn->ncalls++;
-    for(int i=0;i<16;i++){ xi->argmap[i]=-1; xi->argelem[i]=0; }
+    for(int i=0;i<AOT_MAXP;i++){ xi->argmap[i]=-1; xi->argelem[i]=0; }
     xi->nxargs=0; xi->nkwargs=0; xi->splat=0; xi->dsplat=0; xi->emptysplat=0;
     for(int i=0;i<e->count;i++){
         Expr *a=e->items[i];

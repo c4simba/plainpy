@@ -41,9 +41,9 @@ AFunc *op_method_of(Ck *c, Ty *obj, const char *name, Ty *arg, int line){
     if(m->nparams<(arg?2:1) || (m->nparams>(arg?2:1) && !op_defaults_ok(c,m,arg?2:1)))     /* (x + y with __add__(self, other, context=None)) */
         ck_err(c,line,"%s.%s takes %d argument%s",obj->cls->name,name,arg?1:0,arg?"":"s");
     if(arg && m->pristine && !method_overridden(c,m)){                     /* a generic one (x[i] and x["name"]): its copy for arg */
-        Ty *at[16]={0}; Ty *a=ty_find(arg); unsigned omit=0;
+        Ty *at[AOT_MAXP]={0}; Ty *a=ty_find(arg); unsigned omit=0;
         if(!ty_known(a)) return m;                                          /* (decided in a later pass) */
-        for(int i=2;i<m->nparams && i<16;i++) if(m->defaults[i] && m->defaults[i]->kind==EXPR_NONE) omit|=1u<<i;   /* (its defaults: None) */
+        for(int i=2;i<m->nparams && i<AOT_MAXP;i++) if(m->defaults[i] && m->defaults[i]->kind==EXPR_NONE) omit|=1u<<i;   /* (its defaults: None) */
         at[1]=a; m=instance_for_none(c,m,at,NULL,omit,0,0,line); }
     if(arg){ char what[96]; snprintf(what,sizeof what,"the operand of %s",name); expect(c,m->params[1]->ty,arg,line,what); }
     return m;

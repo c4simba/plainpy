@@ -248,8 +248,8 @@ Ty *ck_partial(Ck *c, Expr *e){
     if(ft->k==TY_VAR) return pending(c,line,"the function of partial()");
     if(ft->k!=TY_FUNC || ft->tup) ck_err(c,line,"partial() needs a function with fixed parameters, not %s",ty_name(ft));
     AFunc *fn= xinfo(fx)->kind==X_FUNCREF ? xinfo(fx)->fn : NULL;
-    int np=ft->nelems; Expr *bound[16]={0}; int pos=0;
-    if(np>16) ck_err(c,line,"too many parameters");
+    int np=ft->nelems; Expr *bound[AOT_MAXP]={0}; int pos=0;
+    if(np>AOT_MAXP) ck_err(c,line,"too many parameters");
     for(int i=1;i<e->count;i++){ Expr *a=e->items[i];
         if(a->akind==3){ int p=-1; if(fn && fn->def) for(int k=0;k<fn->nparams;k++) if(!strcmp(fn->def->params[k],a->kw)) p=k;
             if(p<0) ck_err(c,line,"partial(): keyword argument '%s' needs a function defined with that parameter",a->kw);

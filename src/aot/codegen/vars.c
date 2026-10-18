@@ -37,7 +37,7 @@ AVar *root_var(AVar *v){ while(v->src) v=v->src; return v; }
 void layout_defaults(AFunc *fn){
     if(fn->deflaid) return;
     fn->deflaid=1; int off=0;
-    for(int i=0;i<fn->nparams && i<16;i++){ if(!fn->defaults[i] || i==fn->star || i==fn->dstar) continue; fn->defoff[i]=off; off+=ty_size(fn->params[i]->ty); }
+    for(int i=0;i<fn->nparams && i<AOT_MAXP;i++){ if(!fn->defaults[i] || i==fn->star || i==fn->dstar) continue; fn->defoff[i]=off; off+=ty_size(fn->params[i]->ty); }
     fn->defsize=off;
 }
 /* a default evaluated where its function is defined (not a constant put in at the call) */

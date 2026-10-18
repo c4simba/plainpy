@@ -48,7 +48,7 @@ PLAINPY_SRC = $(COMMON_SRC) $(INTERP_SRC) main
 PLAINPYC_SRC = $(COMMON_SRC) $(AOT_SRC) aot/main
 HOST_PLATFORM_SRC    = targets/posix/startup targets/posix/fs_host targets/posix/thread
 KOLIBRI_PLATFORM_SRC = targets/kolibri/startup targets/kolibri/console targets/kolibri/fs_kolibri targets/kolibri/syscall targets/kolibri/thread \
-                       targets/kolibri/ports_libc
+                       targets/kolibri/ports_libc targets/kolibri/format
 
 HEADERS  = $(wildcard src/*.h src/targets/*.h src/targets/*/*.h src/interp/*.h src/interp/*/*.h src/aot/*.h src/aot/*/*.h)
 INCLUDES = -Isrc -I$(BUILD_DIR)/gen
@@ -98,7 +98,7 @@ LIB_ID = $(BUILD_DIR)/gen/libid.h
 # the version (rewritten only when VERSION changes: the programs are built again then)
 VERSION_H = $(BUILD_DIR)/gen/version.h
 
-.PHONY: all test test-update test-typed test-leaks test-pkg test-port test-bytecode test-ssl test-kolibri-ssl bench clean kolibrios kolibrios-debug clean-kolibri debug \
+.PHONY: all test test-update test-typed test-leaks test-pkg test-port test-bytecode test-ssl test-requests test-kolibri-ssl test-kolibri-requests bench clean kolibrios kolibrios-debug clean-kolibri debug \
         install uninstall dist deb rpm kolibrios-dist kolibri-tls print-version wasm wasm-node FORCE
 
 all: $(HOST_TARGET) $(HOST_COMPILER) $(HOST_LIB)
@@ -192,10 +192,16 @@ test-port: $(HOST_TARGET) $(HOST_COMPILER) $(HOST_LIB)
 test-ssl: $(HOST_TARGET) $(HOST_COMPILER) $(HOST_LIB)
 	@sh tests/run_ssl_tests.sh
 
+# requests (lib/requests/) against CPython's http.server: the interpreter, a compiled program
+test-requests: $(HOST_TARGET) $(HOST_COMPILER) $(HOST_LIB)
+	@sh tests/run_requests_tests.sh
+
 # TLS on KolibriOS (mbedtls.obj), a compiled client and server in QEMU against CPython's:
 # KOS_IMG=<a KolibriOS floppy image>, qemu-system-i386, mtools, fasm (FASM=...)
 test-kolibri-ssl: $(HOST_TARGET) $(HOST_COMPILER) $(HOST_LIB) $(BUILD_DIR)/kolibri/mbedtls.obj
 	@sh tests/run_kolibri_ssl_tests.sh
+test-kolibri-requests: $(HOST_TARGET) $(HOST_COMPILER) $(HOST_LIB) $(BUILD_DIR)/kolibri/mbedtls.obj
+	@sh tests/run_kolibri_requests_tests.sh
 
 # bytecode files: the tests with plainpy.lib's modules as bytecode, and each test run from its .ppyc
 test-bytecode: $(HOST_TARGET) $(HOST_LIB)
@@ -332,7 +338,7 @@ wasm: $(WASM_DIR)/plainpy.js
 $(WASM_DIR)/plainpy.js: $(WASM_OBJ) $(WASM_DIR)/obj/targets/wasm/web.o $(LIB) $(LIB_PY)
 	@mkdir -p $(WASM_DIR)/data/lib
 	cp $(LIB) $(WASM_DIR)/data/plainpy.lib
-	cp $(LIB_PY) $(WASM_DIR)/data/lib/
+	$(call copy_lib,$(WASM_DIR)/data/lib)
 	$(EMCC) $(WASM_OBJ) $(WASM_DIR)/obj/targets/wasm/web.o -o $@ $(WASM_LDFLAGS) \
 		-sMODULARIZE=1 -sEXPORT_NAME=createPlainpy -sENVIRONMENT=web,worker,node -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 \
 		-sFORCE_FILESYSTEM=1 -sEXPORTED_FUNCTIONS=_ppy_web_start,_ppy_web_run -sEXPORTED_RUNTIME_METHODS=ccall,FS \
@@ -341,7 +347,7 @@ wasm-node: $(WASM_DIR)/node/plainpy
 $(WASM_DIR)/node/plainpy: $(WASM_OBJ) $(WASM_DIR)/obj/main.o src/targets/wasm/node_pre.js $(LIB) $(LIB_PY)
 	@mkdir -p $(WASM_DIR)/node/lib
 	cp $(LIB) $(WASM_DIR)/node/plainpy.lib
-	cp $(LIB_PY) $(WASM_DIR)/node/lib/
+	$(call copy_lib,$(WASM_DIR)/node/lib)
 	$(EMCC) $(WASM_OBJ) $(WASM_DIR)/obj/main.o -o $(WASM_DIR)/node/plainpy.js $(WASM_LDFLAGS) \
 		-sENVIRONMENT=node -sNODERAWFS=1 -sEXIT_RUNTIME=1 --pre-js src/targets/wasm/node_pre.js
 	printf '#!/bin/sh\nexec node "$$(dirname "$$0")/plainpy.js" "$$@"\n' > $@
@@ -368,7 +374,11 @@ BINDIR  ?= $(PREFIX)/bin
 LIBDIR  ?= $(PREFIX)/lib/plainpy
 DOCDIR  ?= $(PREFIX)/share/doc/plainpy
 INSTALL ?= install
-LIB_PY   = $(sort $(wildcard lib/*.py))
+LIB_PY   = $(sort $(wildcard lib/*.py lib/*/*.py))
+LIB_FILES = $(patsubst lib/%,%,$(LIB_PY))
+LIB_DIRS  = $(sort $(filter-out ./,$(dir $(LIB_FILES))))
+# lib/'s modules and packages (lib/requests/ ...) copied into $(1), laid out as they are
+copy_lib = for f in $(LIB_FILES); do mkdir -p $(1)/$$(dirname $$f) && cp lib/$$f $(1)/$$f || exit 1; done
 OS_NAME  = $(if $(filter Darwin,$(shell uname -s)),macos,$(shell uname -s | tr A-Z a-z))
 ARCH     = $(shell uname -m)
 DIST_DIR = $(BUILD_DIR)/dist
@@ -387,12 +397,13 @@ install: $(HOST_TARGET) $(HOST_COMPILER) $(HOST_LIB)
 	$(INSTALL) -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(LIBDIR)/lib $(DESTDIR)$(DOCDIR)
 	$(INSTALL) -m 755 $(HOST_TARGET) $(HOST_COMPILER) $(DESTDIR)$(BINDIR)/
 	$(INSTALL) -m 644 $(HOST_LIB) $(DESTDIR)$(LIBDIR)/
-	$(INSTALL) -m 644 $(LIB_PY) $(DESTDIR)$(LIBDIR)/lib/
+	for f in $(LIB_FILES); do $(INSTALL) -d $(DESTDIR)$(LIBDIR)/lib/$$(dirname $$f) && $(INSTALL) -m 644 lib/$$f $(DESTDIR)$(LIBDIR)/lib/$$f || exit 1; done
 	$(INSTALL) -m 644 README.md LICENSE LICENSE.PSF $(DESTDIR)$(DOCDIR)/
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(notdir $(HOST_TARGET)) $(DESTDIR)$(BINDIR)/$(notdir $(HOST_COMPILER))
-	rm -f $(DESTDIR)$(LIBDIR)/plainpy.lib $(addprefix $(DESTDIR)$(LIBDIR)/lib/,$(notdir $(LIB_PY)))
+	rm -f $(DESTDIR)$(LIBDIR)/plainpy.lib $(addprefix $(DESTDIR)$(LIBDIR)/lib/,$(LIB_FILES))
+	-rmdir $(addprefix $(DESTDIR)$(LIBDIR)/lib/,$(LIB_DIRS)) 2>/dev/null
 	rm -f $(DESTDIR)$(DOCDIR)/README.md $(DESTDIR)$(DOCDIR)/LICENSE $(DESTDIR)$(DOCDIR)/LICENSE.PSF
 	-rmdir $(DESTDIR)$(LIBDIR)/lib $(DESTDIR)$(LIBDIR) $(DESTDIR)$(DOCDIR) 2>/dev/null
 
@@ -438,7 +449,7 @@ kolibrios-dist: $(KOS_BIN) $(KOS_BINC) $(KOS_LIB)
 	rm -rf $(DIST_DIR)/$(KOS_DIST)
 	mkdir -p $(DIST_DIR)/$(KOS_DIST)/lib
 	cp $(KOS_BIN) $(KOS_BINC) $(KOS_LIB) $(wildcard $(KOS_TLS)) LICENSE LICENSE.PSF $(DIST_DIR)/$(KOS_DIST)/
-	cp $(LIB_PY) $(DIST_DIR)/$(KOS_DIST)/lib/
+	$(call copy_lib,$(DIST_DIR)/$(KOS_DIST)/lib)
 	cd $(DIST_DIR) && rm -f ../$(KOS_DIST).zip && zip -qr ../$(KOS_DIST).zip $(KOS_DIST)
 	@echo "built $(BUILD_DIR)/$(KOS_DIST).zip"
 

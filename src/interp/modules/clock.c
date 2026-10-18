@@ -1,33 +1,11 @@
 /* ========================= Interpreter, modules: _ppy_time =========================
    What time.py does most, in C for the interpreter (compiled programs have their own code
-   for it): the clocks (clock_gettime; KolibriOS keeps time.py's), a struct_time made at
-   once, the date of a day, and strftime of the usual directives (None: time.py does the
+   for it): the clocks (clock_gettime; KolibriOS: time.py's way, in C), a struct_time made
+   at once, the date of a day, and strftime of the usual directives (None: time.py does the
    rest - its text is the reference, this gives the same). */
 
 #include "modules.h"
 #include <time.h>
-
-/* ---- the clocks: time.py's numbers (Linux's): 0 real time, 1 monotonic, 2 the process's CPU time, 3 the thread's */
-#if !defined(PPY_KOLIBRI)
-static struct timespec clk_read(int64_t clk){
-    struct timespec ts;
-    clockid_t id= clk==1 ? CLOCK_MONOTONIC : clk==2 ? CLOCK_PROCESS_CPUTIME_ID : clk==3 ? CLOCK_THREAD_CPUTIME_ID : CLOCK_REALTIME;
-    clock_gettime(id,&ts);
-    return ts;
-}
-#define CLOCK_FNS(name,clk) \
-    static Value tm_##name(int argc, Value *argv, TupleObj *kw){ (void)argv; mod_no_kw(#name,kw); mod_nargs(#name,argc,0,0); \
-        struct timespec ts=clk_read(clk); return v_float((double)ts.tv_sec+(double)ts.tv_nsec/1e9); } \
-    static Value tm_##name##_ns(int argc, Value *argv, TupleObj *kw){ (void)argv; mod_no_kw(#name "_ns",kw); mod_nargs(#name "_ns",argc,0,0); \
-        struct timespec ts=clk_read(clk); return v_int((int64_t)ts.tv_sec*1000000000+ts.tv_nsec); }
-CLOCK_FNS(time,0) CLOCK_FNS(monotonic,1) CLOCK_FNS(process_time,2) CLOCK_FNS(thread_time,3)
-static Value tm_clock(int argc, Value *argv, TupleObj *kw){           /* clock(clk): (seconds, nanoseconds) - time.py's _clock */
-    mod_no_kw("clock",kw); mod_nargs("clock",argc,1,1);
-    struct timespec ts=clk_read(mp_index(argv[0],"clock"));
-    Value v[2]={v_int((int64_t)ts.tv_sec),v_int((int64_t)ts.tv_nsec)};
-    return mp_tuple(2,v);
-}
-#endif
 
 /* ---- dates */
 static int64_t fdiv(int64_t a, int64_t b){ int64_t q=a/b; return (a%b!=0 && (a<0)!=(b<0)) ? q-1 : q; }   /* Python's // */
@@ -41,6 +19,65 @@ static void civil(int64_t days, int64_t *y, int64_t *m, int64_t *d){
     int64_t yoe=(doe-doe/1460+doe/36524-doe/146096)/365, doy=doe-(365*yoe+yoe/4-yoe/100), mp=(5*doy+2)/153;
     *d=doy-(153*mp+2)/5+1; *m= mp<10 ? mp+3 : mp-9; *y=yoe+era*400+(*m<=2);
 }
+
+/* ---- the clocks: time.py's numbers (Linux's): 0 real time, 1 monotonic, 2 the process's CPU time, 3 the thread's */
+typedef struct { int64_t sec, nsec; } Clk;
+#if !defined(PPY_KOLIBRI)
+static Clk clk_read(int64_t clk){
+    struct timespec ts;
+    clockid_t id= clk==1 ? CLOCK_MONOTONIC : clk==2 ? CLOCK_PROCESS_CPUTIME_ID : clk==3 ? CLOCK_THREAD_CPUTIME_ID : CLOCK_REALTIME;
+    clock_gettime(id,&ts);
+    Clk c={(int64_t)ts.tv_sec,(int64_t)ts.tv_nsec};
+    return c;
+}
+#else
+/* KolibriOS, as time.py's _kns / _kwall / _clock do it (compiled programs run those): nanoseconds since boot
+   from function 26.10 (HPET) when it agrees with 26.9's 1/100 s, else 26.9's; the real time adds the wall
+   clock (functions 3 and 29: the CMOS clock, slow to read) in the counter's steps - read again once a second,
+   followed when it moved by more than 1.5 s; the other clocks are the counter */
+static uint32_t k_hundredths(void){ uint32_t a; __asm__ __volatile__("int $0x40" : "=a"(a) : "a"(26), "b"(9) : "memory"); return a; }
+static uint64_t k_hpet(void){ uint32_t a, b=10, d; __asm__ __volatile__("int $0x40" : "=a"(a), "+b"(b), "=d"(d) : "a"(26) : "ecx", "memory"); return ((uint64_t)d<<32)|a; }
+static uint32_t k_fn(uint32_t fn){ uint32_t a; __asm__ __volatile__("int $0x40" : "=a"(a) : "a"(fn) : "memory"); return a; }
+static int k_trusted=-1;
+static int64_t k_ns(void){
+    if(k_trusted<0){ int64_t t=k_hundredths(), d=(int64_t)(k_hpet()/10000000)-t; k_trusted= d>=-2 && d<=2; }
+    return k_trusted ? (int64_t)k_hpet() : (int64_t)k_hundredths()*10000000;
+}
+static int64_t bcd(uint32_t x){ return (int64_t)((x>>4)*10+(x&15)); }
+static int64_t k_wall(void){
+    uint32_t d=k_fn(29), t=k_fn(3);
+    if(k_fn(29)!=d){ d=k_fn(29); t=k_fn(3); }
+    int64_t days=days_from_civil(2000+bcd(d&255),bcd((d>>8)&255),bcd((d>>16)&255));
+    return ((days*24+bcd(t&255))*60+bcd((t>>8)&255))*60+bcd((t>>16)&255);
+}
+static int k_have_off; static int64_t k_off, k_read_at;
+static Clk clk_read(int64_t clk){
+    int64_t ns=k_ns();
+    if(clk==0){
+        if(!k_have_off || ns-k_read_at>=1000000000){
+            int64_t wall=k_wall()*1000000000, drift=k_off+ns-wall;
+            if(!k_have_off || drift>1500000000 || drift<-1500000000){ k_off=wall-ns; k_have_off=1; }
+            k_read_at=ns;
+        }
+        ns+=k_off;
+    }
+    Clk c={fdiv(ns,1000000000),0}; c.nsec=ns-c.sec*1000000000;
+    return c;
+}
+#endif
+#define CLOCK_FNS(name,clk) \
+    static Value tm_##name(int argc, Value *argv, TupleObj *kw){ (void)argv; mod_no_kw(#name,kw); mod_nargs(#name,argc,0,0); \
+        Clk c=clk_read(clk); return v_float((double)c.sec+(double)c.nsec/1e9); } \
+    static Value tm_##name##_ns(int argc, Value *argv, TupleObj *kw){ (void)argv; mod_no_kw(#name "_ns",kw); mod_nargs(#name "_ns",argc,0,0); \
+        Clk c=clk_read(clk); return v_int(c.sec*1000000000+c.nsec); }
+CLOCK_FNS(time,0) CLOCK_FNS(monotonic,1) CLOCK_FNS(process_time,2) CLOCK_FNS(thread_time,3)
+static Value tm_clock(int argc, Value *argv, TupleObj *kw){           /* clock(clk): (seconds, nanoseconds) - time.py's _clock */
+    mod_no_kw("clock",kw); mod_nargs("clock",argc,1,1);
+    Clk c=clk_read(mp_index(argv[0],"clock"));
+    Value v[2]={v_int(c.sec),v_int(c.nsec)};
+    return mp_tuple(2,v);
+}
+
 static Value tm_civil(int argc, Value *argv, TupleObj *kw){            /* civil(days): (year, month, day) - time.py's _civil */
     mod_no_kw("civil",kw); mod_nargs("civil",argc,1,1);
     int64_t y,m,d; civil(mp_index(argv[0],"civil"),&y,&m,&d);
@@ -214,12 +251,10 @@ static Value tm_datetime_at(int argc, Value *argv, TupleObj *kw){
 
 Value make_ppy_time(void){
     Value m=register_module("_ppy_time");
-#if !defined(PPY_KOLIBRI)
     set_fn(m,"time",tm_time); set_fn(m,"time_ns",tm_time_ns); set_fn(m,"monotonic",tm_monotonic); set_fn(m,"monotonic_ns",tm_monotonic_ns);
     set_fn(m,"process_time",tm_process_time); set_fn(m,"process_time_ns",tm_process_time_ns);
     set_fn(m,"thread_time",tm_thread_time); set_fn(m,"thread_time_ns",tm_thread_time_ns); set_fn(m,"clock",tm_clock);
     set_fn(m,"perf_counter",tm_monotonic); set_fn(m,"perf_counter_ns",tm_monotonic_ns);       /* (time.py's: the monotonic clock) */
-#endif
     set_fn(m,"civil",tm_civil); set_fn(m,"make",tm_make); set_fn(m,"set_struct",tm_set_struct); set_fn(m,"fields",tm_fields); set_fn(m,"strftime",tm_strftime);
     set_fn(m,"strftime_ymd",tm_strftime_ymd); set_fn(m,"obj",tm_obj); set_fn(m,"datetime_at",tm_datetime_at);
     return m;

@@ -41,10 +41,10 @@ static void cmp_instances(Ck *c){
         for(int w=0;w<2;w++){ AFunc *m=aot_find_method(k,w?"__lt__":"__eq__");
             if(!m || !m->pristine || m->nparams<2 || method_overridden(c,m)) continue;
             unsigned omit=0; int extra_ok=1;                    /* (__lt__(self, other, context=None): the rest left None) */
-            for(int q=2;q<m->nparams;q++){ if(q<16 && m->defaults[q] && m->defaults[q]->kind==EXPR_NONE) omit|=1u<<q; else extra_ok=0; }
+            for(int q=2;q<m->nparams;q++){ if(q<AOT_MAXP && m->defaults[q] && m->defaults[q]->kind==EXPR_NONE) omit|=1u<<q; else extra_ok=0; }
             if(!extra_ok) continue;
             AFunc *have= w ? k->lt_inst : k->eq_inst; if(have) continue;
-            Ty *at[16]={0}; at[1]=ty_new(TY_OBJ,NULL,k);
+            Ty *at[AOT_MAXP]={0}; at[1]=ty_new(TY_OBJ,NULL,k);
             AModule *save=c->mod; c->mod=m->mod;
             AFunc *g=instance_for_none(c,m,at,NULL,omit,0,0,m->line);
             c->mod=save;

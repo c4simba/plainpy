@@ -282,7 +282,7 @@ AFunc *new_func(Ck *c, AFunc *f, AModule *m, AClass *cls, Stmt *def, AFunc *oute
         else if(k!=3) f->ndeco++;
     }
     if(f->ndeco && (f->is_property || (cls && !strcmp(def->name,"__init__")))) ck_err(c,def->line,"%s.%s: decorators cannot be combined with @property or __init__ in compiled code",cls?cls->name:"",def->name);
-    if(def->param_count>16) ck_err(c,def->line,"too many parameters");
+    if(def->param_count>AOT_MAXP) ck_err(c,def->line,"too many parameters (at most %d)",AOT_MAXP);
     no_nested_defs(c,def->body,def->body_count,1);
     if(def->star_index>=0 && def->annotations && def->star_index<def->annotation_cap){ Expr *an=def->annotations[def->star_index];   /* *args: sys._PackArgs */
         if(an && an->kind==EXPR_ATTRIBUTE && !strcmp(an->name,"_PackArgs") && an->a->kind==EXPR_NAME && !strcmp(an->a->name,"sys")){
@@ -355,7 +355,7 @@ AFunc *new_lambda(Ck *c, Expr *e){
     AFunc *f=PPY_NEW0(AFunc);
     f->name="<lambda>"; f->mod=c->mod; f->outer=c->fn; f->lam=e; f->line=e->line; f->star=f->dstar=-1;
     if(e->name) f->shown=e->name;                                          /* (a type made a function: <class 'list'>) */
-    if(e->neparam>16) ck_err(c,e->line,"too many parameters");
+    if(e->neparam>AOT_MAXP) ck_err(c,e->line,"too many parameters (at most %d)",AOT_MAXP);
     f->nparams=e->neparam; f->kwonly=f->nparams;
     if(e->edefaults){ f->star=e->estar; f->dstar=e->edstar; f->kwonly=e->ekwonly; }          /* (lambdas the compiler makes have none) */
     f->params=PPY_NEW_ARR(AVar*,f->nparams>0?f->nparams:1);
@@ -383,7 +383,7 @@ Ty *fn_type(Ck *c, AFunc *f, int line){
     if(f->check_failed) ck_err(c,line,"%s() has errors (reported above): it cannot be used here",f->name);   /* (check mode) */
     const char *why=fn_type_problem(f);
     if(why && !(c->ep_value && f->is_async && !f->outer && !f->cls && !strcmp(why,"a coroutine"))) ck_err(c,line,"%s() cannot be used as a value in compiled code (%s)",f->name,why);
-    if(!f->fty){ Ty *ps[16]; int n=0;
+    if(!f->fty){ Ty *ps[AOT_MAXP]; int n=0;
         for(int i=0;i<f->nparams;i++) ps[n++]=i==f->star||i==f->dstar ? ty_find(f->params[i]->ty)->elem : f->params[i]->ty;
         f->fty=ty_func(ps,n,f->ret); f->fty->tup=(f->star>=0?1:0)|(f->dstar>=0?2:0);
         int nreg= f->star>=0 ? f->star : f->dstar>=0 ? f->dstar : f->nparams, nd=0;   /* (keyword-only ones are parameters of the value too) */

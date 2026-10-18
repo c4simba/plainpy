@@ -196,9 +196,23 @@ def _kinfo(p: str) -> buffer:
     """fn 70.5: the BDVK of p (attributes at +0, times at +8/+16/+24, size at +32), or an error."""
     b = sys.buffer(40)
     st = _kstatus(_kfs(5, 0, 0, 0, sys.addr(b), p))
-    if st != 0:
-        raise _error(_kerrno(st), p)
+    if st != 0 or not sys.peek(b, 0, 4) & 0x10:
+        if _kroot(p):
+            b = sys.buffer(40)
+            sys.poke(b, 0, 0x10, 4)
+            return b
+        if st != 0:
+            raise _error(_kerrno(st), p)
     return b
+
+
+def _kroot(p: str) -> bool:
+    """A disk or a partition (/hd0, /hd0/1, /rd/1): fn 70.5 has nothing on one, fn 70.1 reads it as a folder."""
+    if p.count("/") > 2 or not p.startswith("/"):
+        return False
+    d = sys.buffer(32 + 560)
+    st = _kstatus(_kfs(1, 0, 3, 1, sys.addr(d), p))
+    return st == 0 or st == 6
 
 
 def _days(y: int, m: int, d: int) -> int:
@@ -261,11 +275,14 @@ def _kfile(fd: int) -> _KFile:
 def _kexists(p: str) -> int:
     """-1: no such path, 0: a file, 1: a folder."""
     b = sys.buffer(40)
-    if _kstatus(_kfs(5, 0, 0, 0, sys.addr(b), p)) != 0:
-        return -1
-    if sys.peek(b, 0, 4) & 0x10:
+    kind = -1
+    if _kstatus(_kfs(5, 0, 0, 0, sys.addr(b), p)) == 0:
+        kind = 0
+        if sys.peek(b, 0, 4) & 0x10:
+            return 1
+    if _kroot(p):
         return 1
-    return 0
+    return kind
 
 
 def _kcreate(p: str) -> None:
@@ -347,7 +364,7 @@ def write(fd: int, data: bytes) -> int:
             f.pos = _u64(_kinfo(f.path), 32)
         if len(data) == 0:
             return 0
-        buf = sys.buffer(data)
+        buf = sys.buffer(bytes(data))                  # (a bytearray or a memoryview as well)
         r = _kfs(3, f.pos, 0, len(data), sys.addr(buf), f.path)
         st = _kstatus(r)
         if st != 0:

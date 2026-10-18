@@ -3,6 +3,8 @@
 
 #include "aot.h"
 
+#define AOT_MAXP 24             /* the most parameters of a function (and arguments of a call) in compiled code */
+
 /* ========================= Typed compiler: program model =========================
    Shared by the type checker (aot/types) and the code generator
    (aot/codegen). Every variable, parameter, return value, field and
@@ -152,6 +154,8 @@ struct AFunc {
     int none_calls;         /* generic module function / copy: calls of it seen (by pick_instance) */
     unsigned none_omit, none_fn, none_given, none_folded;   /* generic copies: parameters with a default None that calls leave out / give a function / give;
                                                  `p is None` decided when compiling (key=None: sorted(xs) or sorted(xs, key=key)) */
+    unsigned none_relied;   /* ... parameters its calls of other functions passed on as left out (all its calls leaving them out then):
+                               not a copy for a call giving one (post(json=x) and request(data=y) of the same request()) */
     const char *shown;      /* how its value prints when not as a function (a type made a function: "<class 'list'>") */             /* call sites seen by the checker */
     int unused;             /* a module function nothing calls whose types are unknown: not compiled */
     int star, dstar;        /* parameter index of *args / **kwargs, else -1 */
@@ -165,7 +169,7 @@ struct AFunc {
     Ty *yield_ty;           /* generator: what it yields */
     AVar **caps; int ncaps, capcap;   /* captured variables (closure fields) */
     int capsize;            /* bytes of captured values */
-    int defsize, defoff[16], deflaid;   /* the defaults kept in its function objects: after the header, before the captures */
+    int defsize, defoff[AOT_MAXP], deflaid;   /* the defaults kept in its function objects: after the header, before the captures */
     AVar *selfvar;          /* nested def: the enclosing function's variable bound to it */
     int top_index;          /* checker: the top-level statement being checked */
     int value_used;         /* referenced as a value (needs a closure object) */
@@ -270,7 +274,7 @@ typedef struct XInfo {
     AClass *cls;
     AField *field;
     const char *name;       /* builtin / type method name */
-    int argmap[16];         /* call: parameter index -> argument index (-1: default) */
+    int argmap[AOT_MAXP];         /* call: parameter index -> argument index (-1: default) */
     int packed;             /* call: its extra positional arguments made one tuple (*args: sys._PackArgs) */
     AVar **cvars;           /* comprehension: variables of clause i at [2*i], [2*i+1] */
     Expr *key, *rev;        /* sorted/sort/min/max: key= and reverse= (lambda: its parameter in xinfo(key)->var) */
@@ -280,7 +284,7 @@ typedef struct XInfo {
     int *xargs; int nxargs; /* call: arguments collected by *args (positional) */
     int *kwargs; int nkwargs; /* call: keyword arguments collected by **kwargs */
     int splat, dsplat;      /* call: index+1 of the f(*xs) / f(**d) argument feeding *args / **kwargs, else 0 */
-    int argelem[16];        /* call: parameter i comes from element argelem[i]-1 of the f(*tuple) argument argmap[i] (0: the argument itself) */
+    int argelem[AOT_MAXP];        /* call: parameter i comes from element argelem[i]-1 of the f(*tuple) argument argmap[i] (0: the argument itself) */
     int emptysplat;         /* call: index+1 of an f(*list) argument with no parameter left (it must be empty) */
     struct ACFunc *cfn;     /* X_CCALL */
     int own_var;            /* a name in a comprehension target: var is its own (each `_` one of them) */
