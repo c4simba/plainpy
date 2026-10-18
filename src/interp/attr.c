@@ -4,10 +4,40 @@
 
 #include "run.h"
 
-Value mp_type_lookup(Type *t, Value name){
+static Value type_lookup(Type *t, Value name){
     Value v;
     for(int i=0;i<t->nmro;i++) if(mp_tdict(t->mro[i]) && mp_dict_get(t->mro[i]->dict,name,&v)) return v;
     return v_undef();
+}
+/* what a type's MRO has for an interned name (undefined: nothing), as of mp_type_epoch: a type's
+   attribute, a method - the lookup of almost every attribute; CPython's type cache */
+#if defined(PPY_LOWMEM)
+#define TCACHE_SIZE 256                                   /* (8 KiB on 32-bit) */
+#else
+#define TCACHE_SIZE 4096
+#endif
+typedef struct { Type *t; Obj *name; uint64_t epoch; Value v; } TCEnt;
+static TCEnt tcache[TCACHE_SIZE];
+Value mp_type_lookup(Type *t, Value name){
+    if(name.k!=V_OBJ || !(name.u.o->flags&OF_INTERNED)) return type_lookup(t,name);
+    uintptr_t h=((uintptr_t)t>>4)*31u ^ ((uintptr_t)name.u.o>>4);
+    TCEnt *e=&tcache[(h^(h>>12))&(TCACHE_SIZE-1)];
+    if(e->t==t && e->name==name.u.o && e->epoch==mp_type_epoch) return e->v;
+    Value v=type_lookup(t,name);
+    e->t=t; e->name=name.u.o; e->epoch=mp_type_epoch; e->v=v;  /* (the epoch after: filling a type's dict on the way changes it) */
+    return v;
+}
+unsigned mp_type_hooks(Type *t){
+    if(t->hook_epoch!=mp_type_epoch){
+        unsigned h=0;
+        if(t->flags&TF_DUNDERS){
+            if(mp_type_lookup_user(t,"__getattribute__").k!=V_UNDEF) h|=TH_GETATTRIBUTE;
+            if(mp_type_lookup_user(t,"__getattr__").k!=V_UNDEF) h|=TH_GETATTR;
+            if(mp_type_lookup_user(t,"__setattr__").k!=V_UNDEF) h|=TH_SETATTR;
+            if(mp_type_lookup_user(t,"__delattr__").k!=V_UNDEF) h|=TH_DELATTR;
+            if(mp_type_lookup_s(t,"__getattr__").k!=V_UNDEF) h|=TH_GETATTR_ANY; }
+        t->hooks=h; t->hook_epoch=mp_type_epoch; }
+    return t->hooks;
 }
 Value mp_type_lookup_s(Type *t, const char *name){ return mp_type_lookup(t,mp_intern(name)); }
 /* a special method for the interpreter to call: a Python function, or a built-in one a class
@@ -72,7 +102,7 @@ static Value fn_annotate(int argc, Value *argv, TupleObj *kw){
 }
 int mp_getattr_opt(Value o, Value name, Value *out){
     Type *t=TYPE(o);
-    if(o.k==V_OBJ && t->layout!=LY_TYPE && (t->flags&TF_HEAP)){
+    if(o.k==V_OBJ && t->layout!=LY_TYPE && (t->flags&TF_HEAP) && (mp_type_hooks(t)&TH_GETATTRIBUTE)){
         Value gab=mp_type_lookup_user(t,"__getattribute__");        /* a class's own __getattribute__ (then __getattr__) */
         if(gab.k!=V_UNDEF){
             Catch c; Value r;
@@ -115,7 +145,7 @@ static int getattr_generic(Value o, Value name, Value *out, int with_getattr){
         int found=0; Value v=special_attr(o,n,&found);
         if(found){ *out=v; return 1; }
         if(md.k!=V_UNDEF){ *out=descr_get(md,o,t); return 1; }
-        if(t!=T_type && (t->flags&TF_HEAP)){
+        if(t!=T_type && (t->flags&TF_HEAP) && (mp_type_hooks(t)&TH_GETATTR)){
             Value ga=mp_type_lookup_user(t,"__getattr__");
             if(ga.k!=V_UNDEF){
                 Catch c; Value r;
@@ -141,7 +171,7 @@ static int getattr_generic(Value o, Value name, Value *out, int with_getattr){
     int found=0; Value v=special_attr(o,n,&found);
     if(found){ *out=v; return 1; }
     if(t->layout==LY_NUM && mp_getattr_opt(mp_unbox(o),name,out)) return 1;     /* (x.real of an int subclass: its value's) */
-    if((t->flags&TF_DUNDERS) && with_getattr){
+    if((t->flags&TF_DUNDERS) && with_getattr && (mp_type_hooks(t)&TH_GETATTR_ANY)){
         Value ga=mp_type_lookup_s(t,"__getattr__");
         if(ga.k!=V_UNDEF){
             Catch c; Value r;
@@ -337,7 +367,7 @@ void mp_setattr(Value o, Value name, Value v){
             mp_call2(p->set,o,v); return; }
         if(d.u.o->type->flags&TF_DUNDERS){ Value s=mp_type_lookup_s(d.u.o->type,"__set__"); if(s.k!=V_UNDEF){ Value a[3]={d,o,v}; mp_call(s,3,a,NULL); return; } }
     }
-    if(t->flags&TF_DUNDERS){
+    if((t->flags&TF_DUNDERS) && (mp_type_hooks(t)&TH_SETATTR)){
         Value sa=mp_type_lookup_user(t,"__setattr__");
         if(sa.k!=V_UNDEF){ Value a[3]={o,name,v}; mp_call(sa,3,a,NULL); return; }
     }
@@ -369,7 +399,7 @@ void mp_delattr(Value o, Value name){
     if(t->layout==LY_TYPE){ if(!mp_dict_del(mp_tdict(AS_TYPE(o)),name)) mp_raise_t(E_AttributeError,"type object '%s' has no attribute '%s'",AS_TYPE(o)->name->s,mp_cstr(name)); return; }
     Value d=mp_type_lookup(t,name);
     if(IS(d,T_property)){ PropertyObj *p=(PropertyObj*)d.u.o; if(p->del.k==V_UNDEF||IS_NONE(p->del)) mp_raise_t(E_AttributeError,"property '%s' of '%s' object has no deleter",mp_cstr(name),t->name->s); mp_call1(p->del,o); return; }
-    if(t->flags&TF_DUNDERS){ Value da=mp_type_lookup_user(t,"__delattr__"); if(da.k!=V_UNDEF){ mp_call2(da,o,name); return; } }
+    if((t->flags&TF_DUNDERS) && (mp_type_hooks(t)&TH_DELATTR)){ Value da=mp_type_lookup_user(t,"__delattr__"); if(da.k!=V_UNDEF){ mp_call2(da,o,name); return; } }
     DictObj *dict=inst_dict(o);
     if(dict && mp_dict_del(dict,name)) return;
     mp_raise_t(E_AttributeError,"'%s' object has no attribute '%s'",t->name->s,mp_cstr(name));

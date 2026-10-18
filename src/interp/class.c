@@ -134,7 +134,7 @@ static void compute_mro(Type *t){
         out[n++]=cand;
         for(int i=0;i<=nb;i++) if(pos[i]<lens[i] && seqs[i][pos[i]]==cand) pos[i]++;
     }
-    free(t->mro); t->mro=(Type**)xrealloc(out,sizeof(Type*)*(size_t)n); t->nmro=n;
+    free(t->mro); t->mro=(Type**)xrealloc(out,sizeof(Type*)*(size_t)n); t->nmro=n; mp_type_epoch++;
     free(seqs[nb]); free(seqs); free(lens); free(pos);
 }
 void mp_type_finish(Type *t){ compute_mro(t); }
@@ -156,7 +156,7 @@ Value mp_make_class_kw(Type *meta, Value name, Value bases, DictObj *ns, int nkw
     }
     if(b->len==0){ Value o=v_obj(T_object); bases=mp_tuple(1,&o); b=AS_TUPLE(bases); }
     Type *t=(Type*)mp_alloc(meta,sizeof(Type));
-    t->name=AS_STR(name); t->bases=b; t->dict=ns; t->flags=TF_BASETYPE|TF_HEAP|TF_DUNDERS;
+    t->name=AS_STR(name); t->bases=b; t->dict=ns; t->flags=TF_BASETYPE|TF_HEAP|TF_DUNDERS; mp_tdict_watch(ns);
     { static const char *const implicit[]={"__init_subclass__","__class_getitem__"};   /* plain functions: classmethods (as CPython) */
       for(int i=0;i<2;i++){ Value f; if(mp_dict_get_s(ns,implicit[i],&f) && IS(f,T_function)){
           BoxObj *cm=(BoxObj*)mp_alloc(T_classmethod,sizeof(BoxObj)); cm->v=f; mp_dict_set(ns,mp_intern(implicit[i]),v_obj(cm)); } } }
@@ -201,7 +201,7 @@ Value mp_make_class_kw(Type *meta, Value name, Value bases, DictObj *ns, int nkw
 Value mp_new_type(const char *name, Type *base, Layout layout, int flags){
     Type *t=(Type*)mp_alloc(T_type,sizeof(Type));
     t->name=AS_STR(mp_intern(name)); t->qualname=t->name; t->base=base; t->layout=layout; t->flags=flags|TF_BUILTIN;
-    t->dict=AS_DICT(mp_dict());
+    t->dict=AS_DICT(mp_dict()); mp_tdict_watch(t->dict);
     if(base){ if(base->make && layout==base->layout) t->make=base->make; note_subclass(base,t); }
     /* (one base: the MRO is it and the base's; __bases__ is made when it is asked for - mp_type_bases) */
     t->nmro= base ? base->nmro+1 : 1; t->mro=(Type**)xmalloc(sizeof(Type*)*(size_t)t->nmro);
@@ -228,14 +228,14 @@ void mp_type_add(Type *t, const char *name, NFn fn){
         if(nruns==cruns){ cruns=cruns?cruns*2:64; runs=(LazyRun*)xrealloc(runs,sizeof(LazyRun)*(size_t)cruns); }
         runs[nruns].t=t; runs[nruns].first=nlazy; runs[nruns].n=0; nruns++; }
     lazy[nlazy].name=name; lazy[nlazy].fn=fn; nlazy++; runs[nruns-1].n++;
-    t->flags|=TF_LAZY;
+    t->flags|=TF_LAZY; mp_type_epoch++;                  /* (a lookup that found nothing may find it now) */
 }
 TupleObj *mp_type_bases(Type *t){
     if(!t->bases){ Value b=v_obj(t->base); t->bases=AS_TUPLE(t->base ? mp_tuple(1,&b) : mp_tuple(0,NULL)); }
     return t->bases;
 }
 void mp_type_fill(Type *t){
-    if(!t->dict) t->dict=AS_DICT(mp_dict());             /* (an exception class has none until it is needed) */
+    if(!t->dict){ t->dict=AS_DICT(mp_dict()); mp_tdict_watch(t->dict); }   /* (an exception class has none until it is needed) */
     if(!(t->flags&TF_LAZY)) return;
     t->flags&=~TF_LAZY;
     int n=0;

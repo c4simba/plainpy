@@ -88,7 +88,7 @@ static Value m_update(int argc, Value *argv, TupleObj *kw){
     return v_none();
 }
 static Value m_dcopy(int argc, Value *argv, TupleObj *kw){ (void)kw; nargs("copy",argc,0,0); Value d=mp_dict(); int64_t pos=0; Value k, v; while(mp_dict_next(D(SELF),&pos,&k,&v)) mp_dict_set(AS_DICT(d),k,v); return d; }
-static Value m_dclear(int argc, Value *argv, TupleObj *kw){ (void)kw; nargs("clear",argc,0,0); DictObj *d=D(SELF); free(d->ent); free(d->idx); d->ent=NULL; d->idx=NULL; d->nent=d->cap=d->used=d->isize=0; return v_none(); }
+static Value m_dclear(int argc, Value *argv, TupleObj *kw){ (void)kw; nargs("clear",argc,0,0); DictObj *d=D(SELF); mp_dict_changed(d); free(d->ent); free(d->idx); d->ent=NULL; d->idx=NULL; d->nent=d->cap=d->used=d->isize=0; return v_none(); }
 static Value m_fromkeys(int argc, Value *argv, TupleObj *kw){ (void)kw;
     int base= IS_TYPE(argv[0]) ? 1 : 0;
     Value d=mp_dict(), it=mp_iter(argv[base]), k, v= argc>base+1 ? argv[base+1] : v_none();

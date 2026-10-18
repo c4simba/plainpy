@@ -43,6 +43,7 @@ void mp_gil_acquire(Thread *self){
 /* ---------------------------------------------------------------- memory */
 static Obj *gc_head;
 static StrObj **itab; static size_t itab_size, itab_used;   /* the interned strs (mp_intern) */
+uint64_t mp_type_epoch=1, mp_globals_epoch=1;                 /* (interp.h: the caches' epochs) */
 static int64_t gc_count, gc_threshold=20000;
 /* the bytes made since the last collection (objects, list and dict tables) and how many may be:
    PPY_LOWMEM (a small board's heap) collects by bytes - half the live data and 8 KiB more at
@@ -168,11 +169,11 @@ static void mark_children(Obj *o){
 }
 static void free_obj(Obj *o){
     switch(o->type->layout){
-        case LY_TYPE: free(((Type*)o)->mro); break;
+        case LY_TYPE: free(((Type*)o)->mro); mp_type_epoch++; break;      /* (another type may come at its address) */
         case LY_LIST: free(((ListObj*)o)->items); break;
-        case LY_DICT: free(((DictObj*)o)->ent); free(((DictObj*)o)->idx); break;
+        case LY_DICT: mp_dict_changed((DictObj*)o); free(((DictObj*)o)->ent); free(((DictObj*)o)->idx); break;
         case LY_SET: free(((SetObj*)o)->table); break;
-        case LY_CODE:{ CodeObj *c=(CodeObj*)o; if(!(c->flags&CO_BORROWED)){ free(c->code); free(c->loc); free(c->carets); } free(c->consts); free(c->names); free(c->varnames); free(c->cellnames); free(c->freenames); free(c->cellarg);
+        case LY_CODE:{ CodeObj *c=(CodeObj*)o; if(!(c->flags&CO_BORROWED)){ free(c->code); free(c->loc); free(c->carets); } free(c->gcache); free(c->consts); free(c->names); free(c->varnames); free(c->cellnames); free(c->freenames); free(c->cellarg);
             if(c->annots){ for(int i=0;i<c->argc+c->kwonly+2;i++) free(c->annots[i]); free(c->annots); }
             for(int i=0;i<c->nann;i++){ free(c->annname[i]); free(c->anntext[i]); }
             free(c->annname); free(c->anntext); break; }
@@ -377,7 +378,7 @@ Value mp_intern(const char *s){
         if(o->hash==h && (size_t)o->len==n && !memcmp(o->s,s,n)) return v_obj(o);
     }
     Value v=mp_strn(s,(int64_t)n);
-    StrObj *o=AS_STR(v); o->hash=h; o->hashed=1;
+    StrObj *o=AS_STR(v); o->hash=h; o->hashed=1; o->h.flags|=OF_INTERNED;
     itab_put(o); itab_used++;
     return v;
 }
@@ -626,6 +627,7 @@ void mp_dict_set(DictObj *d, Value key, Value val){
     uint64_t h=hash_as(key,"dict key"); int found;
     if(!d->idx) dict_rebuild(d,1);
     int64_t slot=dict_lookup(d,key,h,&found);
+    if(d->h.flags) mp_dict_changed(d);
     if(found){ d->ent[ix_get(d,(uint64_t)slot)].val=val; return; }
     if(d->nent+1>d->cap || (d->nent+1)*3>d->isize*2){ dict_rebuild(d,d->used+1); slot=dict_lookup(d,key,h,&found); }
     d->ent[d->nent].key=key; d->ent[d->nent].val=val; d->ent[d->nent].hash=h;
@@ -637,6 +639,7 @@ int mp_dict_del(DictObj *d, Value key){
     int64_t slot=dict_lookup(d,key,h,&found);
     if(!found) return 0;
     int64_t ix=ix_get(d,(uint64_t)slot);
+    if(d->h.flags) mp_dict_changed(d);
     d->ent[ix].key=v_undef(); d->ent[ix].val=v_undef();
     ix_set(d,(uint64_t)slot,-2); d->used--;
     return 1;

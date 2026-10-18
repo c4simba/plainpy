@@ -848,7 +848,7 @@ void mp_init(void){
     Type *boot[5]={T_type,T_object,T_str,T_dict,T_tuple};
     const char *names[5]={"type","object","str","dict","tuple"};
     for(int i=0;i<5;i++){ boot[i]->mro=(Type**)xmalloc(sizeof(Type*)*2); }
-    for(int i=0;i<5;i++){ Type *t=boot[i]; t->dict=AS_DICT(mp_dict()); }
+    for(int i=0;i<5;i++){ Type *t=boot[i]; t->dict=AS_DICT(mp_dict()); mp_tdict_watch(t->dict); }
     for(int i=0;i<5;i++){ Type *t=boot[i]; t->name=AS_STR(mp_intern(names[i])); t->qualname=t->name; t->base= t==T_object?NULL:T_object;
         if(t==T_object){ t->bases=AS_TUPLE(mp_tuple(0,NULL)); t->mro[0]=t; t->nmro=1; }
         else { Value ob=v_obj(T_object); t->bases=AS_TUPLE(mp_tuple(1,&ob)); t->mro[0]=t; t->mro[1]=T_object; t->nmro=2; } }

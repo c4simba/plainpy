@@ -14,6 +14,38 @@ static Value load_global(Frame *f, StrObj *name){
     if(mp_dict_get(f->builtins,v_obj(name),&v)) return v;
     raise_name(E_NameError,f,name->s,"name '%s' is not defined",name->s);
 }
+/* a + b, a * b ... of two ints or floats (an int with a float as num_op does it), done in the loop;
+   0: the general way (overflow, a zero divisor, a negative one for // and %, other operators) */
+static inline __attribute__((always_inline)) int fast_arith(int op, Value a, Value b, Value *r){
+    if(a.k==V_INT && b.k==V_INT){
+        int64_t x=a.u.i, y=b.u.i, z;
+        switch(op){
+            case OP_Add: if(__builtin_add_overflow(x,y,&z)) return 0; break;
+            case OP_Sub: if(__builtin_sub_overflow(x,y,&z)) return 0; break;
+            case OP_Mult: if(__builtin_mul_overflow(x,y,&z)) return 0; break;
+            case OP_FloorDiv: if(y<=0) return 0; z=x/y; if(x%y!=0 && x<0) z--; break;
+            case OP_Mod: if(y<=0) return 0; z=x%y; if(z<0) z+=y; break;
+            case OP_Div: if(y==0) return 0; *r=v_float((double)x/(double)y); return 1;
+            case OP_BitAnd: z=x&y; break;
+            case OP_BitOr: z=x|y; break;
+            case OP_BitXor: z=x^y; break;
+            case OP_RShift: if(y<0 || y>=64) return 0; z=x>>y; break;
+            default: return 0;
+        }
+        *r=v_int(z); return 1;
+    }
+    if((a.k==V_FLOAT || a.k==V_INT) && (b.k==V_FLOAT || b.k==V_INT)){
+        double x= a.k==V_FLOAT ? a.u.f : (double)a.u.i, y= b.k==V_FLOAT ? b.u.f : (double)b.u.i;
+        switch(op){
+            case OP_Add: *r=v_float(x+y); return 1;
+            case OP_Sub: *r=v_float(x-y); return 1;
+            case OP_Mult: *r=v_float(x*y); return 1;
+            case OP_Div: if(y==0) return 0; *r=v_float(x/y); return 1;
+            default: return 0;
+        }
+    }
+    return 0;
+}
 static const char *cellname(CodeObj *co, int i){ return i<co->ncells ? co->cellnames[i]->s : co->freenames[i-co->ncells]->s; }
 static Value unpack_list(Value seq, int64_t want, int ex){
     if(IS_TUPLE(seq) || IS_LIST(seq)) return seq;
@@ -198,7 +230,19 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
                 v=((CellObj*)f->cells[arg].u.o)->v;
                 if(v.k==V_UNDEF) raise_name(E_NameError,f,n,"cannot access free variable '%s' where it is not associated with a value in enclosing scope",n);
                 PUSH(v); break; }
-            case I_LOAD_GLOBAL: PUSH(load_global(f,co->names[arg])); break;
+            case I_LOAD_GLOBAL:{
+#if !defined(PPY_LOWMEM)
+                GCache *gc=co->gcache;                   /* (what it found before, while no globals / builtins dict changed) */
+                if(gc){ gc+=arg; if(gc->epoch==mp_globals_epoch && gc->g==f->globals && gc->b==f->builtins){ PUSH(gc->v); break; } }
+                Value v=load_global(f,co->names[arg]);
+                if(!co->gcache){ co->gcache=(GCache*)xmalloc(sizeof(GCache)*(size_t)co->nnames); memset(co->gcache,0,sizeof(GCache)*(size_t)co->nnames); }
+                f->globals->h.flags|=OF_GDICT; f->builtins->h.flags|=OF_GDICT;
+                gc=co->gcache+arg; gc->epoch=mp_globals_epoch; gc->g=f->globals; gc->b=f->builtins; gc->v=v;
+                PUSH(v);
+#else
+                PUSH(load_global(f,co->names[arg]));
+#endif
+                break; }
             case I_STORE_GLOBAL: mp_dict_set(f->globals,v_obj(co->names[arg]),POP()); break;
             case I_DEL_GLOBAL: if(!mp_dict_del(f->globals,v_obj(co->names[arg]))) raise_name(E_NameError,f,co->names[arg]->s,"name '%s' is not defined",co->names[arg]->s); break;
             case I_LOAD_NAME:{ Value v; Value nm=v_obj(co->names[arg]);
@@ -238,22 +282,25 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
                 else { if(args[-1].k==V_OBJ && args[-1].u.o->type->layout==LY_NUM) args[-1]=mp_unbox(args[-1]);   /* (an int subclass's: its value) */
                     r=((NativeObj*)m.u.o)->fn(n+1,args-1,kw); }
                 f->sp-=n+2; PUSH(r); break; }
-            case I_SUBSCR:{ Value k=POP(); TOP()=mp_getitem(TOP(),k); break; }
-            case I_STORE_SUBSCR:{ Value k=POP(), o=POP(), v=POP(); mp_setitem(o,k,v); break; }
+            case I_SUBSCR:{ Value k=POP(), o=TOP();
+                if(o.k==V_OBJ){ Type *t=o.u.o->type;              /* a list's / tuple's item by an int, a dict's: here */
+                    if(k.k==V_INT && (t==T_list || t==T_tuple)){
+                        int64_t n= t==T_list ? AS_LIST(o)->len : AS_TUPLE(o)->len, i=k.u.i; if(i<0) i+=n;
+                        if(i>=0 && i<n){ TOP()= t==T_list ? AS_LIST(o)->items[i] : AS_TUPLE(o)->items[i]; break; } }
+                    else if(t==T_dict){ Value v; if(mp_dict_get(AS_DICT(o),k,&v)){ TOP()=v; break; } } }
+                TOP()=mp_getitem(o,k); break; }
+            case I_STORE_SUBSCR:{ Value k=POP(), o=POP(), v=POP();
+                if(o.k==V_OBJ){ Type *t=o.u.o->type;
+                    if(t==T_list && k.k==V_INT){ ListObj *l=AS_LIST(o); int64_t i=k.u.i; if(i<0) i+=l->len;
+                        if(i>=0 && i<l->len){ l->items[i]=v; break; } }
+                    else if(t==T_dict){ mp_dict_set(AS_DICT(o),k,v); break; } }
+                mp_setitem(o,k,v); break; }
             case I_DEL_SUBSCR:{ Value k=POP(), o=POP(); mp_delitem(o,k); break; }
-            case I_BINOP:{ Value b=POP(), a=TOP();
-                if(a.k==V_INT && b.k==V_INT){
-                    int64_t r;
-                    if(arg==OP_Add && !__builtin_add_overflow(a.u.i,b.u.i,&r)){ TOP()=v_int(r); break; }
-                    if(arg==OP_Sub && !__builtin_sub_overflow(a.u.i,b.u.i,&r)){ TOP()=v_int(r); break; }
-                }
+            case I_BINOP:{ Value b=POP(), a=TOP(), r;
+                if(fast_arith(arg,a,b,&r)){ TOP()=r; break; }
                 TOP()=mp_binop(arg,a,b); break; }
-            case I_INPLACE:{ Value b=POP(), a=TOP();
-                if(a.k==V_INT && b.k==V_INT){
-                    int64_t r;
-                    if(arg==OP_Add && !__builtin_add_overflow(a.u.i,b.u.i,&r)){ TOP()=v_int(r); break; }
-                    if(arg==OP_Sub && !__builtin_sub_overflow(a.u.i,b.u.i,&r)){ TOP()=v_int(r); break; }
-                }
+            case I_INPLACE:{ Value b=POP(), a=TOP(), r;
+                if(fast_arith(arg,a,b,&r)){ TOP()=r; break; }   /* (ints and floats: += is +) */
                 TOP()=mp_inplace(arg,a,b); break; }
             case I_UNARY: TOP()=mp_unary(arg,TOP()); break;
             case I_NOT: TOP()=v_bool(!mp_truth(TOP())); break;
@@ -261,6 +308,11 @@ Value eval(Frame *f, Value sent, int resume, int throwing){
             case I_COMPARE:{ Value b=POP(), a=TOP();
                 if(a.k==V_INT && b.k==V_INT){
                     int64_t x=a.u.i, y=b.u.i; int r=-1;
+                    switch(arg){ case OP_Lt: r=x<y; break; case OP_LtE: r=x<=y; break; case OP_Gt: r=x>y; break; case OP_GtE: r=x>=y; break; case OP_Eq: r=x==y; break; case OP_NotEq: r=x!=y; break; default: break; }
+                    if(r>=0){ TOP()=v_bool(r); break; }
+                }
+                else if(a.k==V_FLOAT && b.k==V_FLOAT){            /* (an int with a float: compared exactly, the general way) */
+                    double x=a.u.f, y=b.u.f; int r=-1;
                     switch(arg){ case OP_Lt: r=x<y; break; case OP_LtE: r=x<=y; break; case OP_Gt: r=x>y; break; case OP_GtE: r=x>=y; break; case OP_Eq: r=x==y; break; case OP_NotEq: r=x!=y; break; default: break; }
                     if(r>=0){ TOP()=v_bool(r); break; }
                 }

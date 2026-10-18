@@ -43,6 +43,12 @@ static inline Value v_obj(void *o){ Value v; v.k=V_OBJ; v.u.o=(Obj*)o; return v;
 /* ---------------------------------------------------------------- objects */
 typedef struct Type Type;
 struct Obj { Type *type; Obj *gcnext; uint32_t size; uint16_t mark, flags; };
+/* Obj.flags: an interned str (never freed: a key of the caches below by its address); a dict whose
+   changes the caches must see - a type's (mp_type_epoch) or one a frame has as globals / builtins
+   (mp_globals_epoch). Any change of such a dict (or its being freed) makes the epoch new: what the
+   caches remember from before is not used. */
+enum { OF_INTERNED=1, OF_TDICT=2, OF_GDICT=4 };
+extern uint64_t mp_type_epoch, mp_globals_epoch;
 
 /* the C layout of a type's instances */
 typedef enum {
@@ -58,6 +64,8 @@ typedef struct TupleObj { Obj h; int64_t len; uint64_t hash; int hashed; Value i
 typedef struct ListObj { Obj h; Value *items; int64_t len, cap; } ListObj;
 typedef struct { Value key, val; uint64_t hash; } DEnt;
 typedef struct DictObj { Obj h; DEnt *ent; int64_t nent, cap, used; void *idx; int64_t isize; } DictObj;   /* insertion-ordered; idx: 1, 2, 4 or 8 bytes a slot, as isize needs (obj.c) */
+static inline void mp_dict_changed(DictObj *d){ if(d->h.flags&OF_TDICT) mp_type_epoch++; if(d->h.flags&OF_GDICT) mp_globals_epoch++; }
+static inline void mp_tdict_watch(DictObj *d){ if(d){ d->h.flags|=OF_TDICT; mp_type_epoch++; } }
 /* set / frozenset: CPython's table (open addressing, linear probes + perturbation), so they iterate in its order */
 typedef struct { Value key; uint64_t hash; } SEnt;
 typedef struct SetObj { Obj h; SEnt *table; int64_t mask, fill, used, finger; uint64_t hash; int hashed; } SetObj;
@@ -89,7 +97,13 @@ struct Type {
     /* built-in behaviour: construction (args as a call), iteration */
     Value (*make)(Type *t, int argc, Value *argv, TupleObj *kwnames);
     Value subs;            /* the classes made with it as a base (a list; __subclasses__()) */
+    uint64_t hook_epoch; unsigned hooks;   /* TH_* as of mp_type_epoch hook_epoch (mp_type_hooks) */
 };
+/* the attribute hooks a class has (mp_type_hooks): its own (a Python one) __getattribute__, __getattr__,
+   __setattr__, __delattr__; any __getattr__ (mp_type_lookup_s) */
+enum { TH_GETATTRIBUTE=1, TH_GETATTR=2, TH_SETATTR=4, TH_DELATTR=8, TH_GETATTR_ANY=16 };
+unsigned mp_type_hooks(Type *t);
+static inline void mp_tdict_watch(DictObj *d);
 enum { TF_BUILTIN=1, TF_BASETYPE=2, TF_HEAP=4, TF_DUNDERS=8 /* a class: look its dunders up */, TF_ABSTRACT_DONE=16,
        TF_SUBVAL=32 /* a subclass of str, bytes, tuple, list, dict, set, frozenset, int or float: its objects have the
                        built-in's layout (LY_NUM for the numbers) and an instance dict in their last pointer slot */,
@@ -98,6 +112,8 @@ enum { TF_BUILTIN=1, TF_BASETYPE=2, TF_HEAP=4, TF_DUNDERS=8 /* a class: look its
 /* ---------------------------------------------------------------- code, functions */
 enum { CO_VARARGS=1, CO_VARKW=2, CO_GEN=4, CO_CORO=8, CO_ASYNCGEN=16, CO_CLASS=32, CO_MODULE=64, CO_NESTED=128, CO_COMP=256,
        CO_BORROWED=0x20000000 /* code / loc where a bytecode file mapped for good has them (bytecode.c): not freed */ };
+/* what a LOAD_GLOBAL found, valid while mp_globals_epoch is epoch and the frame's dicts are these */
+typedef struct GCache { uint64_t epoch; DictObj *g, *b; Value v; } GCache;
 typedef struct CodeObj {
     Obj h;
     StrObj *name, *qualname;
@@ -108,6 +124,7 @@ typedef struct CodeObj {
     uint8_t *carets; int ncarets;                /* traceback carets' anchors, compact (mp_code_anchor); NULL: none */
     Value *consts; int nconsts;
     StrObj **names; int nnames;                  /* globals, attributes */
+    struct GCache *gcache;                       /* LOAD_GLOBAL's: per name (NULL until the first) */
     StrObj **varnames; int nlocals;              /* the parameters first */
     StrObj **cellnames; int ncells;              /* cells, then the free variables */
     StrObj **freenames; int nfrees;

@@ -1,0 +1,43 @@
+g1
+g2
+2
+42
+3
+from builtins
+changed
+a global first
+changed
+NameError: name 'my_extra' is not defined
+1
+2
+other dict
+A.m
+A.m replaced
+B.m
+A.m replaced
+AttributeError: 'B' object has no attribute 'm'
+missing anything
+AttributeError: 'B' object has no attribute 'anything'
+[('x', 1)] False
+2
+always x always y
+2
+0 0
+1 1
+2 2
+3 -4 -4 2 -2 -4.0 1.5
+9223372036854775807 12 13.5 0.25 3.5 3.5 3.5 1 7 6 -4 0
+ZeroDivisionError: division by zero
+ZeroDivisionError: division by zero
+ZeroDivisionError: division by zero
+False False True False True False True 2 2.5
+2 5.0
+10 30 2 1 1 two
+[10, 21, 31] [('a', 1), ('b', 2), (2, 'two')]
+IndexError: list index out of range
+IndexError: tuple index out of range
+KeyError: 'zz'
+TypeError: list indices must be integers or slices, not str
+TypeError: cannot use 'list' as a dict key (unhashable type: 'list')
+IndexError: list assignment index out of range
+L0 missing q 21 None

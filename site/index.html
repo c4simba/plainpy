@@ -291,10 +291,10 @@ h2 { margin: 0; font-size: clamp(1.9rem, 4.4vw, 2.9rem); letter-spacing: -.035em
 .bars {
   grid-area: bars; position: relative; display: grid; gap: 2px; padding: 3px 0;
   background-image: linear-gradient(to right, var(--line) 1px, transparent 1px);
-  background-size: calc(100% / 6) 100%;
+  background-size: 25% 100%;
   box-shadow: inset -1px 0 0 var(--line);
 }
-.bar { display: block; height: 10px; width: calc(var(--v) / 6 * 100%); min-width: 3px; border-radius: 0 4px 4px 0; position: relative; }
+.bar { display: block; height: 10px; width: calc(var(--v) / 4 * 100%); min-width: 3px; border-radius: 0 4px 4px 0; position: relative; }
 .bar::after { content: ""; position: absolute; inset: -4px 0; }
 .bar.cpy { background: var(--bar-cpython); }
 .bar.ppy { background: var(--bar-plainpy); }
@@ -476,7 +476,7 @@ Hello, world!</pre>
     <div class="fact"><b>0</b><span>dependencies beyond the C&nbsp;library</span></div>
     <div class="fact"><b>3 files</b><span><code>plainpy</code>, <code>plainpyc</code>, <code>plainpy.lib</code>: 2.4&nbsp;MB in all on macOS arm64</span></div>
     <div class="fact"><b>201 B</b><span>“Hello, world!” compiled to a Linux executable</span></div>
-    <div class="fact"><b>15.7×</b><span>faster than CPython&nbsp;3.14 on integer loops, compiled</span></div>
+    <div class="fact"><b>15.8×</b><span>faster than CPython&nbsp;3.14 on integer loops, compiled</span></div>
   </div>
 </div>
 
@@ -652,65 +652,65 @@ print(fib(<span class="s">90</span>), <span class="s">2</span> ** <span class="s
       <div class="rows">
         <div class="row">
           <div class="row-name"><code>loops</code><span>Collatz sequences: while, %, //, * on ints</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:3.50" tabindex="0" data-series="CPython 3.14" data-value="3.50 s"></span><span class="bar ppy" style="--v:0.22" tabindex="0" data-series="plainpy, compiled" data-value="0.22 s"></span><span class="bar int" style="--v:4.29" tabindex="0" data-series="plainpy, interpreted" data-value="4.29 s"></span></div>
-          <div class="row-ratio"><b>15.7×</b> faster</div>
+          <div class="bars"><span class="bar cpy" style="--v:3.50" tabindex="0" data-series="CPython 3.14" data-value="3.50 s"></span><span class="bar ppy" style="--v:0.22" tabindex="0" data-series="plainpy, compiled" data-value="0.22 s"></span><span class="bar int" style="--v:3.90" tabindex="0" data-series="plainpy, interpreted" data-value="3.90 s"></span></div>
+          <div class="row-ratio"><b>15.8×</b> faster</div>
         </div>
         <div class="row">
           <div class="row-name"><code>floats</code><span>the Mandelbrot set, an integral of sin(x)·√x</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:2.01" tabindex="0" data-series="CPython 3.14" data-value="2.01 s"></span><span class="bar ppy" style="--v:0.42" tabindex="0" data-series="plainpy, compiled" data-value="0.42 s"></span><span class="bar int" style="--v:3.81" tabindex="0" data-series="plainpy, interpreted" data-value="3.81 s"></span></div>
+          <div class="bars"><span class="bar cpy" style="--v:1.97" tabindex="0" data-series="CPython 3.14" data-value="1.97 s"></span><span class="bar ppy" style="--v:0.41" tabindex="0" data-series="plainpy, compiled" data-value="0.41 s"></span><span class="bar int" style="--v:2.69" tabindex="0" data-series="plainpy, interpreted" data-value="2.69 s"></span></div>
           <div class="row-ratio"><b>4.8×</b> faster</div>
         </div>
         <div class="row">
           <div class="row-name"><code>listcomp</code><span>comprehensions: filters, tuples, strings, nesting</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:2.56" tabindex="0" data-series="CPython 3.14" data-value="2.56 s"></span><span class="bar ppy" style="--v:0.74" tabindex="0" data-series="plainpy, compiled" data-value="0.74 s"></span><span class="bar int" style="--v:2.57" tabindex="0" data-series="plainpy, interpreted" data-value="2.57 s"></span></div>
-          <div class="row-ratio"><b>3.5×</b> faster</div>
+          <div class="bars"><span class="bar cpy" style="--v:2.45" tabindex="0" data-series="CPython 3.14" data-value="2.45 s"></span><span class="bar ppy" style="--v:0.71" tabindex="0" data-series="plainpy, compiled" data-value="0.71 s"></span><span class="bar int" style="--v:2.42" tabindex="0" data-series="plainpy, interpreted" data-value="2.42 s"></span></div>
+          <div class="row-ratio"><b>3.4×</b> faster</div>
         </div>
         <div class="row">
           <div class="row-name"><code>power</code><span>modular exponentiation, i ** 3, x ** 1.5</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:2.84" tabindex="0" data-series="CPython 3.14" data-value="2.84 s"></span><span class="bar ppy" style="--v:0.92" tabindex="0" data-series="plainpy, compiled" data-value="0.92 s"></span><span class="bar int" style="--v:3.07" tabindex="0" data-series="plainpy, interpreted" data-value="3.07 s"></span></div>
+          <div class="bars"><span class="bar cpy" style="--v:2.83" tabindex="0" data-series="CPython 3.14" data-value="2.83 s"></span><span class="bar ppy" style="--v:0.90" tabindex="0" data-series="plainpy, compiled" data-value="0.90 s"></span><span class="bar int" style="--v:2.49" tabindex="0" data-series="plainpy, interpreted" data-value="2.49 s"></span></div>
           <div class="row-ratio"><b>3.1×</b> faster</div>
         </div>
         <div class="row">
           <div class="row-name"><code>primes</code><span>a sieve over a list, prime gaps in a dict</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:2.87" tabindex="0" data-series="CPython 3.14" data-value="2.87 s"></span><span class="bar ppy" style="--v:1.18" tabindex="0" data-series="plainpy, compiled" data-value="1.18 s"></span><span class="bar int" style="--v:3.70" tabindex="0" data-series="plainpy, interpreted" data-value="3.70 s"></span></div>
-          <div class="row-ratio"><b>2.4×</b> faster</div>
+          <div class="bars"><span class="bar cpy" style="--v:2.70" tabindex="0" data-series="CPython 3.14" data-value="2.70 s"></span><span class="bar ppy" style="--v:1.15" tabindex="0" data-series="plainpy, compiled" data-value="1.15 s"></span><span class="bar int" style="--v:3.58" tabindex="0" data-series="plainpy, interpreted" data-value="3.58 s"></span></div>
+          <div class="row-ratio"><b>2.3×</b> faster</div>
         </div>
         <div class="row">
           <div class="row-name"><code>dicts</code><span>int and str keys: fill, in, get, del, items()</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:2.29" tabindex="0" data-series="CPython 3.14" data-value="2.29 s"></span><span class="bar ppy" style="--v:1.28" tabindex="0" data-series="plainpy, compiled" data-value="1.28 s"></span><span class="bar int" style="--v:2.56" tabindex="0" data-series="plainpy, interpreted" data-value="2.56 s"></span></div>
+          <div class="bars"><span class="bar cpy" style="--v:2.17" tabindex="0" data-series="CPython 3.14" data-value="2.17 s"></span><span class="bar ppy" style="--v:1.23" tabindex="0" data-series="plainpy, compiled" data-value="1.23 s"></span><span class="bar int" style="--v:2.30" tabindex="0" data-series="plainpy, interpreted" data-value="2.30 s"></span></div>
           <div class="row-ratio"><b>1.8×</b> faster</div>
         </div>
         <div class="row">
           <div class="row-name"><code>trees</code><span>parent-linked trees built, walked, dropped as garbage cycles</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:1.69" tabindex="0" data-series="CPython 3.14" data-value="1.69 s"></span><span class="bar ppy" style="--v:1.15" tabindex="0" data-series="plainpy, compiled" data-value="1.15 s"></span><span class="bar int" style="--v:5.81" tabindex="0" data-series="plainpy, interpreted" data-value="5.81 s"></span></div>
+          <div class="bars"><span class="bar cpy" style="--v:1.73" tabindex="0" data-series="CPython 3.14" data-value="1.73 s"></span><span class="bar ppy" style="--v:1.15" tabindex="0" data-series="plainpy, compiled" data-value="1.15 s"></span><span class="bar int" style="--v:3.68" tabindex="0" data-series="plainpy, interpreted" data-value="3.68 s"></span></div>
           <div class="row-ratio"><b>1.5×</b> faster</div>
         </div>
         <div class="row">
           <div class="row-name"><code>clock</code><span>time(), monotonic(), datetime.now(), strftime()</span></div>
-          <div class="bars"><span class="bar cpy" style="--v:2.10" tabindex="0" data-series="CPython 3.14" data-value="2.10 s"></span><span class="bar ppy" style="--v:2.10" tabindex="0" data-series="plainpy, compiled" data-value="2.10 s"></span><span class="bar int" style="--v:3.50" tabindex="0" data-series="plainpy, interpreted" data-value="3.50 s"></span></div>
+          <div class="bars"><span class="bar cpy" style="--v:2.12" tabindex="0" data-series="CPython 3.14" data-value="2.12 s"></span><span class="bar ppy" style="--v:2.12" tabindex="0" data-series="plainpy, compiled" data-value="2.12 s"></span><span class="bar int" style="--v:2.23" tabindex="0" data-series="plainpy, interpreted" data-value="2.23 s"></span></div>
           <div class="row-ratio"><b>1.0×</b> the same</div>
         </div>
       </div>
-      <div class="axis" aria-hidden="true"><div class="axis-ticks"><span style="left:0">0</span><span style="left:16.667%">1</span><span style="left:33.333%">2</span><span style="left:50%">3</span><span style="left:66.667%">4</span><span style="left:83.333%">5</span><span style="left:100%">6 s</span></div></div>
+      <div class="axis" aria-hidden="true"><div class="axis-ticks"><span style="left:0">0</span><span style="left:25%">1</span><span style="left:50%">2</span><span style="left:75%">3</span><span style="left:100%">4 s</span></div></div>
       <details>
         <summary>The numbers as a table</summary>
         <div class="table-wrap">
           <table>
             <thead><tr><th>benchmark</th><th class="num">CPython 3.14</th><th class="num">plainpy, compiled</th><th class="num">compiled vs CPython</th><th class="num">plainpy, interpreted</th></tr></thead>
             <tbody>
-              <tr><td><code>loops</code></td><td class="num">3.50 s</td><td class="num">0.22 s</td><td class="num">15.7× faster</td><td class="num">4.29 s</td></tr>
-              <tr><td><code>floats</code></td><td class="num">2.01 s</td><td class="num">0.42 s</td><td class="num">4.8× faster</td><td class="num">3.81 s</td></tr>
-              <tr><td><code>listcomp</code></td><td class="num">2.56 s</td><td class="num">0.74 s</td><td class="num">3.5× faster</td><td class="num">2.57 s</td></tr>
-              <tr><td><code>power</code></td><td class="num">2.84 s</td><td class="num">0.92 s</td><td class="num">3.1× faster</td><td class="num">3.07 s</td></tr>
-              <tr><td><code>primes</code></td><td class="num">2.87 s</td><td class="num">1.18 s</td><td class="num">2.4× faster</td><td class="num">3.70 s</td></tr>
-              <tr><td><code>dicts</code></td><td class="num">2.29 s</td><td class="num">1.28 s</td><td class="num">1.8× faster</td><td class="num">2.56 s</td></tr>
-              <tr><td><code>trees</code></td><td class="num">1.69 s</td><td class="num">1.15 s</td><td class="num">1.5× faster</td><td class="num">5.81 s</td></tr>
-              <tr><td><code>clock</code></td><td class="num">2.10 s</td><td class="num">2.10 s</td><td class="num">the same</td><td class="num">3.50 s</td></tr>
+              <tr><td><code>loops</code></td><td class="num">3.50 s</td><td class="num">0.22 s</td><td class="num">15.8× faster</td><td class="num">3.90 s</td></tr>
+              <tr><td><code>floats</code></td><td class="num">1.97 s</td><td class="num">0.41 s</td><td class="num">4.8× faster</td><td class="num">2.69 s</td></tr>
+              <tr><td><code>listcomp</code></td><td class="num">2.45 s</td><td class="num">0.71 s</td><td class="num">3.4× faster</td><td class="num">2.42 s</td></tr>
+              <tr><td><code>power</code></td><td class="num">2.83 s</td><td class="num">0.90 s</td><td class="num">3.1× faster</td><td class="num">2.49 s</td></tr>
+              <tr><td><code>primes</code></td><td class="num">2.70 s</td><td class="num">1.15 s</td><td class="num">2.3× faster</td><td class="num">3.58 s</td></tr>
+              <tr><td><code>dicts</code></td><td class="num">2.17 s</td><td class="num">1.23 s</td><td class="num">1.8× faster</td><td class="num">2.30 s</td></tr>
+              <tr><td><code>trees</code></td><td class="num">1.73 s</td><td class="num">1.15 s</td><td class="num">1.5× faster</td><td class="num">3.68 s</td></tr>
+              <tr><td><code>clock</code></td><td class="num">2.12 s</td><td class="num">2.12 s</td><td class="num">the same</td><td class="num">2.23 s</td></tr>
             </tbody>
           </table>
         </div>
       </details>
-      <p class="chart-foot">The interpreter is as fast as CPython on <code>listcomp</code>, takes 1.1 to 1.9 times its time on the other computing benchmarks, 1.7 times on <code>clock</code> and 3.4 times on <code>trees</code>, where an attribute is a dict lookup. On a Mac the macos target is the i386 code translated to C, and these times include that translation’s cost; on x86 Linux and KolibriOS the programs run as the i386 code itself.</p>
+      <p class="chart-foot">The interpreter is faster than CPython on <code>power</code>, as fast on <code>listcomp</code>, and takes 1.05 to 1.4 times its time on the others but <code>trees</code>, 2.1 times, where the collector of garbage cycles and the allocator take a third of the time. On a Mac the macos target is the i386 code translated to C, and these times include that translation’s cost; on x86 Linux and KolibriOS the programs run as the i386 code itself.</p>
     </figure>
   </div>
 </section>
