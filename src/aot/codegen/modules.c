@@ -26,7 +26,10 @@ int gen_sys(F *f, Expr *e, XInfo *xi){
     for(int i=0;i<n;i++){ gen_borrow(f,e->items[i]); E(f,"mov [esp+%d],eax",4*i); }
     if(!strcmp(m,"poke")){ CALLRT(f,"rt_buf_poke"); E(f,"add esp,16"); return 0; }
     if(!strcmp(m,"peek")){ CALLRT(f,"rt_buf_peek"); E(f,"add esp,12"); widen(f,0); return 0; }
-    E(f,"pop eax"); E(f,"pop edx"); E(f,"pop ecx");
+    E(f,"pop eax"); E(f,"pop edx");
+    if(!strcmp(m,"_crc32")||!strcmp(m,"_adler32")){ CALLRT(f,m[1]=='c'?"rt_crc32":"rt_adler32"); widen(f,0); return 0; }   /* (32 bits, unsigned) */
+    E(f,"pop ecx");
+    if(!strcmp(m,"_inflate")){ CALLRT(f,"rt_inflate"); widen(f,1); return 0; }
     if(!strcmp(m,"poke_str")||!strcmp(m,"poke_bytes")){ CALLRT(f,"rt_buf_poke_str"); return 0; }   /* (bytes: the same layout) */
     CALLRT(f,!strcmp(m,"peek_bytes")?"rt_buf_peek_bytes":"rt_buf_peek_str"); return 1;
 }

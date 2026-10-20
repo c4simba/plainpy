@@ -633,6 +633,13 @@ randrange uniform choice shuffle`; xorshift32). Float arithmetic rounds to
 double precision like CPython, and floats print like CPython (`repr`: the
 shortest text that reads back the same).
 
+`zlib` (and so `gzip`, `zipfile`, `tarfile`'s gz) is Python, with what is
+slow in Python done by the runtime in compiled programs: `crc32`, `adler32`
+and the decoding of deflate blocks (`src/aot/runtime/zlib.asm`, after
+puff.c: a block a call, its state kept between calls) - an 8.7 MB zip of 18.7
+MB unpacks some 15 times faster than in Python. The interpreter decodes in
+Python with tables of the next 9 bits of each Huffman code.
+
 ### Imports
 
 Imports are resolved at compile time: the compiler collects the entry script's

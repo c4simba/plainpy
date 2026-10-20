@@ -1,9 +1,11 @@
 # bytearray: everything that makes one, copies it or makes bytes of it - the
 # constructors, slices, + and *, bytes(b), the comparisons and `in` (which
 # compare bytes made of it), the methods that read it through bytes(b),
-# printing - each round, in a field, a list and a dict; the blocks still live
-# at the end must not depend on the number of rounds.
+# printing - each round, in a field, a list and a dict; and zlib, whose
+# inflate fills one (compress, decompress whole and in pieces, the checksums).
+# The blocks still live at the end must not depend on the number of rounds.
 import sys
+import zlib
 
 
 class Holder:
@@ -43,6 +45,12 @@ def round_(i: int, keep: dict[str, bytearray]) -> int:
     d.remove(d[0])
     d.reverse()
     d.clear()
+    z = zlib.compress(bytes(c) * 50, 6)
+    n += len(zlib.decompress(z)) + zlib.crc32(z) % 7 + zlib.adler32(z) % 7
+    do = zlib.decompressobj()
+    for k in range(0, len(z), 13):
+        n += len(do.decompress(z[k:k + 13]))
+    n += len(do.flush())
     return n + len(xs)
 
 

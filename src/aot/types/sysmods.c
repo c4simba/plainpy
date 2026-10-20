@@ -89,6 +89,10 @@ Ty *ck_sys(Ck *c, Expr *e, const char *m){
     if(!strcmp(m,"_sleep")){ ck_positional(c,e,1,1,m); expect(c,TY_FLOAT_T,arg(c,e,0),line,"the seconds"); return TY_VOID_T; }   /* (time.py) */
     if(!strcmp(m,"_rawargs")){ ck_positional(c,e,1,1,m); expect(c,TY_INT_T,arg(c,e,0),line,"the kind"); return ty_new(TY_LIST,TY_STR_T,NULL); }   /* (_sysargs.py) */
     if(!strcmp(m,"_gc_collect")){ ck_positional(c,e,0,0,m); return TY_INT_T; }   /* (gc.py: the cycle collector) */
+    if(!strcmp(m,"_crc32")||!strcmp(m,"_adler32")){ ck_positional(c,e,2,2,m); expect(c,TY_BYTES_T,arg(c,e,0),line,"the data");   /* (zlib.py) */
+        expect(c,TY_INT_T,arg(c,e,1),line,"the checksum so far"); return TY_INT_T; }
+    if(!strcmp(m,"_inflate")){ ck_positional(c,e,3,3,m); expect(c,TY_BUF_T,arg(c,e,0),line,"the state");                   /* (zlib.py: a deflate block) */
+        expect(c,TY_BYTES_T,arg(c,e,1),line,"the input"); expect(c,TY_BYTEARRAY_T,arg(c,e,2),line,"the output"); return TY_INT_T; }
     if(!strcmp(m,"exit")){ ck_positional(c,e,0,1,m); if(e->count) expect(c,TY_INT_T,arg(c,e,0),line,"the exit code"); return TY_VOID_T; }
     if(!strcmp(m,"exception")){ ck_positional(c,e,0,0,m); return lexical_exception(c,e); }
     if(!strcmp(m,"_site")){ Expr *v=site_value(c,e,line); if(!v) ck_err(c,line,"sys._site() takes \"line\", \"file\", \"func\", \"module\", \"name\" or \"source\"");

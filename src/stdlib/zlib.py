@@ -2,7 +2,11 @@
 (zlib, gzip and raw deflate streams), compressobj / decompressobj, crc32, adler32.
 
 decompress() reads any valid stream; compress() makes valid streams of its own (LZ77 with hash
-chains and Huffman codes: not byte for byte what C zlib makes)."""
+chains and Huffman codes: not byte for byte what C zlib makes). In compiled programs the checksums
+and the decoding of deflate blocks are the runtime's (sys._crc32, sys._adler32, sys._inflate:
+src/aot/runtime/zlib.asm)."""
+
+import sys
 
 __all__ = ["compress", "decompress", "compressobj", "decompressobj", "crc32", "adler32", "error", "MAX_WBITS",
            "DEFLATED", "DEF_MEM_LEVEL", "DEF_BUF_SIZE", "Z_BEST_COMPRESSION", "Z_BEST_SPEED", "Z_DEFAULT_COMPRESSION",
@@ -57,6 +61,8 @@ _CRC_TABLE = _make_crc_table()
 
 def crc32(data: bytes, value: int = 0) -> int:
     """The CRC-32 of data (continuing from value)."""
+    if sys._compiled:
+        return sys._crc32(data, value & 0xFFFFFFFF)
     crc = (value & 0xFFFFFFFF) ^ 0xFFFFFFFF
     t = _CRC_TABLE
     for b in data:
@@ -66,6 +72,8 @@ def crc32(data: bytes, value: int = 0) -> int:
 
 def adler32(data: bytes, value: int = 1) -> int:
     """The Adler-32 checksum of data (continuing from value)."""
+    if sys._compiled:
+        return sys._adler32(data, value & 0xFFFFFFFF)
     a = value & 0xFFFF
     b = (value >> 16) & 0xFFFF
     n = len(data)
@@ -91,12 +99,17 @@ _DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 38
 _DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
 _CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 _WINDOW = 32768                         # how far back a distance reaches
+_INFLATE_ERRORS = ["", "invalid block type", "invalid stored block lengths", "invalid code lengths set",
+                   "too many length or distance symbols", "invalid bit length repeat",
+                   "invalid literal/length code", "invalid distance code", "invalid distance too far back"]
 
 
 # ---------------------------------------------------------------- inflate
 
 class _Huffman:
-    """A canonical Huffman decoding table: counts per length, symbols in code order."""
+    """A canonical Huffman decoding table: counts per length, symbols in code order - and fast, by
+    the next 9 bits of the input (a code's bits come first to last: its bits reversed), the symbol
+    << 4 | the code's length of a code of 9 bits or fewer (0: a longer one, decoded a bit at a time)."""
 
     def __init__(self, lengths: list[int]) -> None:
         self.counts = [0] * 16
@@ -112,6 +125,24 @@ class _Huffman:
             if n:
                 self.symbols[offs[n]] = sym
                 offs[n] += 1
+        self.fast = [0] * 512
+        code = 0
+        nxt = [0] * 16                  # the next code of each length (RFC 1951 3.2.2)
+        for n in range(1, 16):
+            code = (code + self.counts[n - 1]) << 1
+            nxt[n] = code
+        for sym in range(len(lengths)):
+            n = lengths[sym]
+            if n == 0:
+                continue
+            c = nxt[n]
+            nxt[n] += 1
+            if n <= 9:
+                r = 0
+                for i in range(n):
+                    r = (r << 1) | ((c >> i) & 1)
+                for i in range(r & 511, 512, 1 << n):
+                    self.fast[i] = sym << 4 | n
 
 
 def _fixed_tables() -> tuple[_Huffman, _Huffman]:
@@ -139,6 +170,8 @@ class _Inflater:
         self.ready_len = 0
         self.final = False
         self.done = False
+        if sys._compiled:
+            self.st = sys.buffer(12)        # sys._inflate's state: the position, the bits read ahead, how many
 
     def pending(self) -> int:
         """How many decoded bytes are not taken yet."""
@@ -186,7 +219,17 @@ class _Inflater:
         return v
 
     def decode(self, h: _Huffman) -> int:
-        code = 0
+        n = len(self.data)
+        while self.bitcnt < 24 and self.pos < n:      # (bits ahead: what the input has, up to 24)
+            self.bitbuf |= self.data[self.pos] << self.bitcnt
+            self.pos += 1
+            self.bitcnt += 8
+        e = h.fast[self.bitbuf & 511]
+        if e != 0 and (e & 15) <= self.bitcnt:
+            self.bitbuf >>= e & 15
+            self.bitcnt -= e & 15
+            return e >> 4
+        code = 0                                       # a longer code, or the input's end: a bit at a time
         first = 0
         index = 0
         for length in range(1, 16):
@@ -202,6 +245,24 @@ class _Inflater:
 
     def run(self) -> None:
         """Decodes blocks while there is data (a block is decoded whole or not at all)."""
+        if sys._compiled:                   # (the runtime's: a block a call, the state in a buffer)
+            st = self.st
+            sys.poke(st, 0, self.pos, 4)
+            sys.poke(st, 4, self.bitbuf, 4)
+            sys.poke(st, 8, self.bitcnt, 4)
+            while not self.done:
+                r = sys._inflate(st, self.data, self.out)
+                if r < 0:
+                    raise error("Error -3 while decompressing data: " + _INFLATE_ERRORS[-r])
+                if r == 0:
+                    break
+                if r == 1:
+                    self.done = True
+                self._settle(_WINDOW)
+            self.pos = sys.peek(st, 0, 4)
+            self.bitbuf = sys.peek(st, 4, 4)
+            self.bitcnt = sys.peek(st, 8, 4)
+            return
         while not self.done:
             save = (self.pos, self.bitbuf, self.bitcnt, len(self.out))
             try:
@@ -210,12 +271,22 @@ class _Inflater:
                 self.pos, self.bitbuf, self.bitcnt, n = save
                 del self.out[n:]
                 return
+            self._give_back()
             self._settle(_WINDOW)
+
+    def _give_back(self) -> None:
+        """The whole bytes read ahead into the bit buffer given back to the input (fewer than 8 bits left)."""
+        k = self.bitcnt >> 3
+        if k:
+            self.pos -= k
+            self.bitcnt -= 8 * k
+            self.bitbuf &= (1 << self.bitcnt) - 1
 
     def _block(self) -> None:
         last = self.bits(1)
         kind = self.bits(2)
         if kind == 0:
+            self._give_back()
             self.bitbuf = 0
             self.bitcnt = 0
             if self.pos + 4 > len(self.data):
@@ -271,30 +342,84 @@ class _Inflater:
         return _Huffman(lens[:nlen]), _Huffman(lens[nlen:])
 
     def _codes(self, lit: _Huffman, dist: _Huffman) -> None:
+        """A block's symbols until its end: the bit buffer in locals, codes found by the fast
+        tables (what they do not have: decode, a bit at a time)."""
         out = self.out
+        data = self.data
+        n = len(data)
+        pos = self.pos
+        buf = self.bitbuf
+        cnt = self.bitcnt
+        lfast = lit.fast
+        dfast = dist.fast
         while True:
-            sym = self.decode(lit)
+            while cnt < 24 and pos < n:
+                buf |= data[pos] << cnt
+                pos += 1
+                cnt += 8
+            e = lfast[buf & 511]
+            if e != 0 and (e & 15) <= cnt:
+                buf >>= e & 15
+                cnt -= e & 15
+                sym = e >> 4
+            else:
+                self.pos = pos
+                self.bitbuf = buf
+                self.bitcnt = cnt
+                sym = self.decode(lit)
+                pos = self.pos
+                buf = self.bitbuf
+                cnt = self.bitcnt
             if sym < 256:
                 out.append(sym)
-            elif sym == 256:
-                return
+                continue
+            if sym == 256:
+                break
+            sym -= 257
+            if sym >= 29:
+                raise error("Error -3 while decompressing data: invalid literal/length code")
+            k = _LEN_EXTRA[sym]
+            if cnt < k:
+                raise _NeedMore()
+            length = _LEN_BASE[sym] + (buf & ((1 << k) - 1))
+            buf >>= k
+            cnt -= k
+            while cnt < 24 and pos < n:
+                buf |= data[pos] << cnt
+                pos += 1
+                cnt += 8
+            e = dfast[buf & 511]
+            if e != 0 and (e & 15) <= cnt:
+                buf >>= e & 15
+                cnt -= e & 15
+                ds = e >> 4
             else:
-                sym -= 257
-                if sym >= 29:
-                    raise error("Error -3 while decompressing data: invalid literal/length code")
-                length = _LEN_BASE[sym] + self.bits(_LEN_EXTRA[sym])
+                self.pos = pos
+                self.bitbuf = buf
+                self.bitcnt = cnt
                 ds = self.decode(dist)
-                if ds >= 30:
-                    raise error("Error -3 while decompressing data: invalid distance code")
-                d = _DIST_BASE[ds] + self.bits(_DIST_EXTRA[ds])
-                if d > len(out):
-                    raise error("Error -3 while decompressing data: invalid distance too far back")
-                start = len(out) - d
-                if d >= length:
-                    out.extend(out[start:start + length])
-                else:
-                    for k in range(length):
-                        out.append(out[start + k])
+                pos = self.pos
+                buf = self.bitbuf
+                cnt = self.bitcnt
+            if ds >= 30:
+                raise error("Error -3 while decompressing data: invalid distance code")
+            k = _DIST_EXTRA[ds]
+            if cnt < k:
+                raise _NeedMore()
+            d = _DIST_BASE[ds] + (buf & ((1 << k) - 1))
+            buf >>= k
+            cnt -= k
+            if d > len(out):
+                raise error("Error -3 while decompressing data: invalid distance too far back")
+            start = len(out) - d
+            if d >= length:
+                out.extend(out[start:start + length])
+            else:
+                for i in range(length):
+                    out.append(out[start + i])
+        self.pos = pos
+        self.bitbuf = buf
+        self.bitcnt = cnt
 
 
 class _NeedMore(Exception):

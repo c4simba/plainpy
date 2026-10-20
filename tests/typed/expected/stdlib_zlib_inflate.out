@@ -1,0 +1,41 @@
+stored (level 0) 1505 1500 True 2486664573 3155697739
+  pieces of 1 True True 0
+  pieces of 7 True True 0
+  pieces of 1000 True True 0
+  pieces of 65536 True True 0
+  max_length 4096 True True
+fixed codes 2636 12000 True 684597481 1111157627
+  pieces of 1 True True 0
+  pieces of 7 True True 0
+  pieces of 1000 True True 0
+  pieces of 65536 True True 0
+  max_length 4096 True True
+dynamic codes (level 9) 2104 12000 True 684597481 1111157627
+  pieces of 1 True True 0
+  pieces of 7 True True 0
+  pieces of 1000 True True 0
+  pieces of 65536 True True 0
+  max_length 4096 True True
+RLE 2696 10000 True 2425789718 2510232047
+  pieces of 1 True True 0
+  pieces of 7 True True 0
+  pieces of 1000 True True 0
+  pieces of 65536 True True 0
+  max_length 4096 True True
+Huffman only 1609 3000 True 913406212 754596618
+  pieces of 1 True True 0
+  pieces of 7 True True 0
+  pieces of 1000 True True 0
+  pieces of 65536 True True 0
+  max_length 4096 True True
+far distances 5737 45000 True 3775606875 3184946388
+  pieces of 1 True True 0
+  pieces of 7 True True 0
+  pieces of 1000 True True 0
+  pieces of 65536 True True 0
+  max_length 4096 True True
+zlib stream True 406408870 3703729370
+gzip stream True True
+error: Error -3 while decompressing data: invalid block type
+error: Error -3 while decompressing data: invalid stored block lengths
+error: Error -3 while decompressing data: invalid distance too far back
