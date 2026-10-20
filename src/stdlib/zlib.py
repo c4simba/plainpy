@@ -90,6 +90,7 @@ _DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 38
               4097, 6145, 8193, 12289, 16385, 24577]
 _DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
 _CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+_WINDOW = 32768                         # how far back a distance reaches
 
 
 # ---------------------------------------------------------------- inflate
@@ -122,16 +123,52 @@ _FIXED_LIT, _FIXED_DIST = _fixed_tables()
 
 
 class _Inflater:
-    """Decodes a deflate stream from data (whole or incrementally fed)."""
+    """Decodes a deflate stream from data (whole or incrementally fed). Of what
+    is decoded, out keeps the window - the last 32 KB, which distances reach
+    back into - and what the current blocks add; after each block the bytes not
+    taken yet go into ready, so out stays small however big the stream."""
 
     def __init__(self) -> None:
         self.data = b""
         self.pos = 0                    # byte position
         self.bitbuf = 0
         self.bitcnt = 0
-        self.out: list[int] = []        # everything decoded (the window is its end)
+        self.out = bytearray()          # the window, then what is not in ready yet
+        self.taken = 0                  # where in out that begins
+        self.ready: list[bytes] = []    # decoded, not taken yet (before out[taken:])
+        self.ready_len = 0
         self.final = False
         self.done = False
+
+    def pending(self) -> int:
+        """How many decoded bytes are not taken yet."""
+        return self.ready_len + len(self.out) - self.taken
+
+    def _settle(self, at_least: int) -> None:
+        """out's bytes not taken into ready (when there are at least at_least
+        of them); out cut down to the window."""
+        if len(self.out) - self.taken < max(1, at_least):
+            return
+        piece = bytes(self.out[self.taken:])
+        self.ready.append(piece)
+        self.ready_len += len(piece)
+        self.taken = len(self.out)
+        drop = self.taken - _WINDOW
+        if drop > 0:
+            del self.out[:drop]
+            self.taken -= drop
+
+    def take(self, limit: int = 0) -> bytes:
+        """The decoded bytes not taken yet (at most limit: 0, all of them)."""
+        self._settle(1)
+        out = self.ready[0] if len(self.ready) == 1 else b"".join(self.ready)
+        self.ready = []
+        self.ready_len = 0
+        if limit > 0 and len(out) > limit:
+            self.ready = [out[limit:]]
+            self.ready_len = len(out) - limit
+            out = out[:limit]
+        return out
 
     def _need(self, n: int) -> None:
         while self.bitcnt < n:
@@ -173,6 +210,7 @@ class _Inflater:
                 self.pos, self.bitbuf, self.bitcnt, n = save
                 del self.out[n:]
                 return
+            self._settle(_WINDOW)
 
     def _block(self) -> None:
         last = self.bits(1)
@@ -594,7 +632,8 @@ class _Decomp:
         self._header_done = False
         self._kind = "zlib" if 8 <= wbits <= 15 else "raw" if wbits < 0 else "gzip" if wbits < 32 else "auto"
         self._buf = b""
-        self._emitted = 0
+        self._emitted = 0               # bytes handed out
+        self._check = 0                 # their adler32 (zlib) or crc32 (gzip): from the header on
         self.unused_data = b""
         self.unconsumed_tail = b""
         self.eof = False
@@ -660,21 +699,26 @@ class _Decomp:
             if not self._header():
                 return b""
             self._header_done = True
+            self._check = 1 if self._kind == "zlib" else 0
         inf = self._inf
         inf.data = self._buf
         inf.run()
         self._buf = inf.data[inf.pos:]
         inf.data = self._buf
         inf.pos = 0
-        out = inf.out[self._emitted:]
-        if max_length > 0 and len(out) > max_length:
-            out = out[:max_length]
+        return self._emit(inf.take(max_length))
+
+    def _emit(self, out: bytes) -> bytes:
+        """out handed over: counted, in the stream's checksum; the end checked
+        once everything is out."""
         self._emitted += len(out)
-        if inf.done and self._emitted >= len(inf.out):
+        if self._kind == "zlib":
+            self._check = adler32(out, self._check)
+        elif self._kind == "gzip":
+            self._check = crc32(out, self._check)
+        if self._inf.done and self._inf.pending() == 0:
             self._finish()
-        if len(inf.out) > 65536 + self._emitted:
-            pass
-        return bytes(out)
+        return out
 
     def _finish(self) -> None:
         inf = self._inf
@@ -686,7 +730,7 @@ class _Decomp:
             if len(rest) < 4:
                 return
             a = (rest[0] << 24) | (rest[1] << 16) | (rest[2] << 8) | rest[3]
-            if a != adler32(bytes(inf.out)):
+            if a != self._check:
                 raise error("Error -3 while decompressing data: incorrect data check")
             rest = rest[4:]
         elif self._kind == "gzip":
@@ -694,9 +738,9 @@ class _Decomp:
                 return
             c = rest[0] | (rest[1] << 8) | (rest[2] << 16) | (rest[3] << 24)
             n = rest[4] | (rest[5] << 8) | (rest[6] << 16) | (rest[7] << 24)
-            if c != crc32(bytes(inf.out)):
+            if c != self._check:
                 raise error("Error -3 while decompressing data: incorrect data check")
-            if n != len(inf.out) & 0xFFFFFFFF:
+            if n != self._emitted & 0xFFFFFFFF:
                 raise error("Error -3 while decompressing data: incorrect length check")
             rest = rest[8:]
         self.eof = True
@@ -705,9 +749,7 @@ class _Decomp:
 
     def flush(self, length: int = DEF_BUF_SIZE) -> bytes:
         """What is left of the output."""
-        out = self._inf.out[self._emitted:]
-        self._emitted += len(out)
-        return bytes(out)
+        return self._emit(self._inf.take())
 
     def copy(self) -> "_Decomp":
         raise ValueError("copy() is not supported")

@@ -55,6 +55,19 @@ int apply_binop(F *f, TokKind op, Ty *t, Ty *ta, Ty *tb, int line){
         }
         return 0;
     }
+    if(t->k==TY_BYTEARRAY){
+        if(op==T_STAR){                                       /* b * n, n * b */
+            if(ta->k==TY_BYTEARRAY){ to_i32(f,tb); E(f,"mov edx,eax"); E(f,"pop eax"); }
+            else { E(f,"mov ecx,eax"); E(f,"pop eax"); if(is_lng(ta)){ E(f,"pop edx"); to_i32(f,ta); } E(f,"mov edx,eax"); E(f,"mov eax,ecx"); }
+            CALLRT(f,"rt_ba_mul"); return 1;
+        }
+        if(op==T_PLUS){                                       /* b + bytes, b + b2: a new bytearray */
+            E(f,"push eax"); E(f,"mov eax,[esp+4]"); CALLRT(f,"rt_ba_copy");
+            E(f,"mov edx,[esp]"); CALLRT(f,tb->k==TY_BYTEARRAY?"rt_ba_extend_ba":"rt_ba_extend_b");
+            E(f,"add esp,8"); return 1;
+        }
+    }
+    if(t->k==TY_BYTES && tb->k==TY_BYTEARRAY && op==T_PLUS){ CALLRT(f,"rt_bytes_of_ba"); hold(f); tb=TY_BYTES_T; }   /* bytes + b: bytes */
     if(t->k==TY_STR||t->k==TY_BYTES||t->k==TY_LIST){
         if(op==T_STAR){                                       /* x * n, n * x: n as a 32-bit count */
             if(ta->k==t->k){ to_i32(f,tb); E(f,"mov edx,eax"); E(f,"pop eax"); }

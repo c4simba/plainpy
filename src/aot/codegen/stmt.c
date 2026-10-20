@@ -192,6 +192,10 @@ static void gen_stmt(F *f, Stmt *s){
                         else { flags|=1<<k; E(f,"mov dword [esp+%d],0",4+4*k); } }
                     E(f,"mov dword [esp+16],%d",flags); CALLRT(f,"rt_list_del_slice"); E(f,"add esp,20");
                     continue; }
+                if(ty_find(TY(t->a))->k==TY_BYTEARRAY){          /* del b[i] */
+                    gen_borrow(f,t->a); check_none(f,TY(t->a),"TypeError","'NoneType' object does not support item deletion"); E(f,"push eax");
+                    gen(f,t->b); to_i32(f,TY(t->b)); E(f,"mov edx,eax"); E(f,"pop eax"); CALLRT(f,"rt_ba_del");
+                    continue; }
                 Ty *ct=TY(t->a), *el=ct->elem; int dict=ct->k==TY_DICT;
                 gen_borrow(f,t->a); check_none(f,ct,"TypeError","'NoneType' object does not support item deletion"); E(f,"push eax");
                 if(dict){ Ty *kt=ty_dkey(ct); gen_as(f,t->b,kt,0); push_value(f,kt);

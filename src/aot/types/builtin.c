@@ -62,7 +62,7 @@ Ty *ck_builtin(Ck *c, Expr *e, const char *name){
     if(xi->rev) expect(c,TY_BOOL_T,ck_expr(c,xi->rev),line,"reverse=");
     if(!strcmp(name,"len")){ ck_positional(c,e,1,1,name); enum_members_expr(c,e->items[0]); Ty *t=ty_find(arg(c,e,0));
         if(t->k==TY_VAR) return pending(c,line,"the argument of len()");
-        if(t->k==TY_STR||t->k==TY_BYTES||t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_BUF||t->k==TY_TUPLE) return TY_INT_T;
+        if(t->k==TY_STR||t->k==TY_BYTES||t->k==TY_BYTEARRAY||t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_BUF||t->k==TY_TUPLE) return TY_INT_T;
         if(t->k==TY_OBJ){ AFunc *m=aot_find_method(t->cls,"__len__"); if(m){ xi->fn=m; return TY_INT_T; } }
         ck_err(c,line,"len() of %s",ty_name(t)); }
     if(!strcmp(name,"str") && e->count>=2){                    /* str(b, encoding[, errors]): b.decode(...) */
@@ -83,7 +83,10 @@ Ty *ck_builtin(Ck *c, Expr *e, const char *name){
         static const char *const n_bytes[]={"source","encoding","errors"};
         kw_to_pos(c,e,name,n_bytes,3); ck_positional(c,e,0,3,name); genexp_as_list(e,0);
         if(!e->count){ xi->name="bytes_empty"; return TY_BYTES_T; }
-        Ty *t=ty_find(gen_as_list(c,e,0)); if(t->k==TY_VAR) return pending(c,line,"the argument of bytes()");
+        Ty *t=ty_find(ck_expr(c,e->items[0]));
+        if(t->k==TY_BYTES && !e->items[0]->akind && e->count==1){ xi->name="bytes_same"; return TY_BYTES_T; }   /* (not list(b) and back) */
+        if(t->k==TY_BYTEARRAY && !e->items[0]->akind && e->count==1){ xi->name="bytes_ba"; return TY_BYTES_T; }
+        t=ty_find(gen_as_list(c,e,0)); if(t->k==TY_VAR) return pending(c,line,"the argument of bytes()");
         if(t->k==TY_STR){
             if(e->count<2) ck_err(c,line,"TypeError: string argument without an encoding");
             if(codecs_module(c)) return ck_codec_call(c,e,e->items[0],0,1);
@@ -95,6 +98,23 @@ Ty *ck_builtin(Ck *c, Expr *e, const char *name){
         if(t->k==TY_LIST||t->k==TY_SET){ expect(c,TY_INT_T,t->elem,line,"the values of bytes()"); xi->name="bytes_list"; return TY_BYTES_T; }
         if(t->k==TY_OBJ){ static const char *const ms[]={"__bytes__",NULL}; Ty *r=dunder_of_arg(c,e,ms); if(r) return r; }
         ck_err(c,line,"TypeError: cannot convert '%s' object to bytes",ty_name(t)); }
+    if(!strcmp(name,"bytearray")){                         /* bytearray(), (n), (bytes), (bytearray), (ints), (str, encoding) */
+        static const char *const n_ba[]={"source","encoding","errors"};
+        kw_to_pos(c,e,name,n_ba,3); ck_positional(c,e,0,3,name); genexp_as_list(e,0);
+        if(!e->count){ xi->name="bytearray_new"; return TY_BYTEARRAY_T; }
+        if(e->items[0]->akind) ck_err(c,line,"bytearray() takes its source as an argument of its own");
+        Ty *t=ty_find(ck_expr(c,e->items[0])); if(t->k==TY_VAR) return pending(c,line,"the argument of bytearray()");
+        if(t->k==TY_STR){
+            if(e->count<2) ck_err(c,line,"TypeError: string argument without an encoding");
+            for(int i=1;i<e->count;i++) if(!is_none(e->items[i])) expect(c,TY_STR_T,arg(c,e,i),line,i==1?"the encoding":"errors");
+            xi->name="bytearray_encode"; return TY_BYTEARRAY_T; }
+        if(e->count>1) ck_err(c,line,"TypeError: encoding without a string argument");
+        if(t->k==TY_INT||t->k==TY_BOOL){ xi->name="bytearray_zeros"; return TY_BYTEARRAY_T; }
+        if(t->k==TY_BYTES){ xi->name="bytearray_bytes"; return TY_BYTEARRAY_T; }
+        if(t->k==TY_BYTEARRAY){ xi->name="bytearray_copy"; return TY_BYTEARRAY_T; }
+        t=ty_find(gen_as_list(c,e,0));
+        if(t->k==TY_LIST||t->k==TY_SET){ expect(c,TY_INT_T,t->elem,line,"the values of bytearray()"); xi->name="bytearray_list"; return TY_BYTEARRAY_T; }
+        ck_err(c,line,"TypeError: cannot convert '%s' object to bytearray",ty_name(t)); }
     if(!strcmp(name,"bytes.fromhex")){ ck_positional(c,e,1,1,"fromhex"); expect(c,TY_STR_T,arg(c,e,0),line,"the argument of fromhex()"); return TY_BYTES_T; }
     if(!strcmp(name,"int.from_bytes")){
         static const char *const n_fb[]={"bytes","byteorder","signed"};
@@ -281,7 +301,7 @@ Ty *ck_builtin(Ck *c, Expr *e, const char *name){
         ck_positional(c,e,1,3,name); for(int i=0;i<e->count;i++) expect(c,TY_INT_T,arg(c,e,i),line,"a range() argument");
         xi->name="range_list"; return ty_new(TY_LIST,TY_INT_T,NULL); }
     if(!strcmp(name,"hash")){ ck_positional(c,e,1,1,name); Ty *t=ty_find(arg(c,e,0)); if(t->k==TY_VAR) return pending(c,line,"the argument of hash()");
-        if(t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET) ck_err(c,line,"unhashable type: '%s'",t->k==TY_LIST?"list":t->k==TY_DICT?"dict":"set");
+        if(t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_BYTEARRAY) ck_err(c,line,"unhashable type: '%s'",t->k==TY_LIST?"list":t->k==TY_DICT?"dict":t->k==TY_SET?"set":"bytearray");
         return TY_INT_T; }
     if(!strcmp(name,"id")){ ck_positional(c,e,1,1,name); Ty *t=ty_find(arg(c,e,0)); if(t->k==TY_VAR) return pending(c,line,"the argument of id()");
         if(t->k==TY_FLOAT) ck_err(c,line,"id() of a float is not supported in compiled code");

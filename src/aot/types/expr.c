@@ -236,6 +236,7 @@ Ty *ck_expr_inner(Ck *c, Expr *e){
             if(t->k==TY_OBJ){ AFunc *m=op_method_of(c,t,"__getitem__",i,e->line); if(!m) ck_err(c,e->line,"%s has no __getitem__",t->cls->name); xi->kind=X_OPMETHOD; xi->fn=m; return m->ret; }
             if(t->k==TY_STR){ expect(c,TY_INT_T,i,e->line,"a string index"); return TY_STR_T; }
             if(t->k==TY_BYTES){ expect(c,TY_INT_T,i,e->line,"a bytes index"); return TY_INT_T; }
+            if(t->k==TY_BYTEARRAY){ expect(c,TY_INT_T,i,e->line,"a bytearray index"); return TY_INT_T; }
             if(t->k==TY_LIST){ expect(c,TY_INT_T,i,e->line,"a list index"); return t->elem; }
             if(t->k==TY_DICT){ expect(c,ty_dkey(t),i,e->line,"a dictionary key"); return t->elem; }
             if(t->k==TY_TUPLE && t->names){                 /* record["key"] */
@@ -275,7 +276,7 @@ Ty *ck_expr_inner(Ck *c, Expr *e){
             if(t->k==TY_OBJ && aot_find_method(t->cls,"__ppy_getslice__")){     /* obj[a:b:c]: obj.__ppy_getslice__(a, b, c) */
                 Expr *call=slice_call(e,"__ppy_getslice__",e->line);
                 void *keep=e->ty; *e=*call; e->ty=keep; return ck_expr_inner(c,e); }
-            if(t->k!=TY_STR&&t->k!=TY_LIST&&t->k!=TY_BYTES) ck_err(c,e->line,"%s cannot be sliced",ty_name(t));
+            if(t->k!=TY_STR&&t->k!=TY_LIST&&t->k!=TY_BYTES&&t->k!=TY_BYTEARRAY) ck_err(c,e->line,"%s cannot be sliced",ty_name(t));
             return t; }
         case EXPR_LIST: case EXPR_SET:{
             if(has_splat(e)){                                   /* [*xs, y]: the elements of xs */

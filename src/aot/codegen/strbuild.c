@@ -107,7 +107,7 @@ const char *class_kd(AClass *c){
 /* append str()/repr() of the value in eax/st0 (borrowed) to the string builder */
 void gen_fmt(F *f, Ty *t, int repr){
     t=ty_find(t);
-    if(t->opt && (!is_ptr(t) || t->k==TY_STR || t->k==TY_BYTES)){             /* None prints as None (other references: their formatters) */
+    if(t->opt && (!is_ptr(t) || t->k==TY_STR || t->k==TY_BYTES || t->k==TY_BYTEARRAY)){   /* None prints as None (other references: their formatters) */
         int lnone=new_label(), lend=new_label();
         jump_if_none(f,t,lnone);
         Ty plain=*t; plain.opt=0; gen_fmt(f,&plain,repr); E(f,"jmp L%d",lend);
@@ -119,6 +119,7 @@ void gen_fmt(F *f, Ty *t, int repr){
         case TY_FLOAT: CALLRT(f,"rt_sb_float"); return;
         case TY_STR: CALLRT(f,repr?"rt_sb_repr_str":"rt_sb_str"); return;
         case TY_BYTES: CALLRT(f,"rt_sb_repr_bytes"); return;
+        case TY_BYTEARRAY: CALLRT(f,"rt_sb_ba"); return;
         case TY_TYPE: CALLRT(f,"rt_sb_type"); return;
         case TY_BUF: E(f,"mov eax,Z%d",zlit("<buffer>")); CALLRT(f,"rt_sb_cstr"); return;
         case TY_TASK: E(f,"mov eax,Z%d",zlit("<Task>")); CALLRT(f,"rt_sb_cstr"); return;

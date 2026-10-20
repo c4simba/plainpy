@@ -792,36 +792,66 @@ rt_str_expandtabs:              ; eax = s, edx = tab size -> eax = new str
         pop     ebp edi esi ebx
         ret
 
-;;; code rt_str_join : rt_sb_bytes rt_sb_take
+;;; code rt_str_join : rt_str_new
 rt_str_join:                    ; eax = separator, edx = list[str] -> eax = new str
-        push    ebx esi edi
-        push    dword [rt_sb_len]
-        mov     esi,eax
-        mov     edi,edx
+                                ; (its length worked out first: made at once, the items copied into it)
+        push    ebx esi edi ebp
+        push    eax                     ; [esp+4] the separator (or 0)
+        push    edx                     ; [esp] the list (or 0)
+        xor     eax,eax                 ; the length
+        xor     ecx,ecx                 ; the items
+        test    edx,edx
+        jz      .make
+        mov     ecx,[edx+8]
+        mov     esi,[edx+16]
         xor     ebx,ebx
-.loop:  test    edi,edi
+.sum:   cmp     ebx,ecx
+        jae     .seps
+        mov     edx,[esi+ebx*4]
+        test    edx,edx
+        jz      @f
+        add     eax,[edx+8]
+@@:     inc     ebx
+        jmp     .sum
+.seps:  test    ecx,ecx                 ; one separator fewer than items
+        jz      .make
+        mov     edx,[esp+4]
+        test    edx,edx
+        jz      .make
+        mov     edx,[edx+8]
+        dec     ecx
+        imul    edx,ecx
+        add     eax,edx
+.make:  call    rt_str_new
+        mov     ebp,eax
+        lea     edi,[eax+12]            ; where the next bytes go
+        xor     ebx,ebx
+.copy:  mov     edx,[esp]
+        test    edx,edx
         jz      .done
-        cmp     ebx,[edi+8]
+        cmp     ebx,[edx+8]
         jae     .done
         test    ebx,ebx
-        jz      @f
-        test    esi,esi
-        jz      @f
-        lea     eax,[esi+12]
-        mov     edx,[esi+8]
-        call    rt_sb_bytes
-@@:     mov     eax,[edi+16]
+        jz      .item
+        mov     eax,[esp+4]
+        test    eax,eax
+        jz      .item
+        lea     esi,[eax+12]
+        mov     ecx,[eax+8]
+        rep     movsb
+.item:  mov     edx,[esp]
+        mov     eax,[edx+16]
         mov     eax,[eax+ebx*4]
         test    eax,eax
         jz      @f
-        mov     edx,[eax+8]
-        add     eax,12
-        call    rt_sb_bytes
+        lea     esi,[eax+12]
+        mov     ecx,[eax+8]
+        rep     movsb
 @@:     inc     ebx
-        jmp     .loop
-.done:  pop     eax
-        call    rt_sb_take
-        pop     edi esi ebx
+        jmp     .copy
+.done:  mov     eax,ebp
+        add     esp,8
+        pop     ebp edi esi ebx
         ret
 
 ;;; code rt_is_space

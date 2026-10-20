@@ -152,6 +152,7 @@ int gen_index(F *f, Expr *e){
     E(f,"mov edx,eax"); E(f,"pop eax");
     if(ct->k==TY_STR){ CALLRT(f,"rt_str_char"); return 0; }
     if(ct->k==TY_BYTES){ CALLRT(f,"rt_bytes_at"); widen(f,0); return 0; }
+    if(ct->k==TY_BYTEARRAY){ CALLRT(f,"rt_ba_at"); widen(f,0); return 0; }
     CALLRT(f,"rt_list_at"); load_mem(f,ct->elem,"eax",0); return 0;
 }
 int gen_slice(F *f, Expr *e){
@@ -166,7 +167,7 @@ int gen_slice(F *f, Expr *e){
     }
     E(f,"mov dword [esp+16],%d",flags);
     if(list) E(f,"mov dword [esp+20],%s",kd_of(t->elem));
-    CALLRT(f,list?"rt_list_slice":"rt_str_slice");
+    CALLRT(f,list?"rt_list_slice":t->k==TY_BYTEARRAY?"rt_ba_slice":"rt_str_slice");
     E(f,"add esp,%d",n);
     return 1;
 }

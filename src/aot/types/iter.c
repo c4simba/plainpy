@@ -8,7 +8,7 @@ Ty *elem_of(Ck *c, Ty *t, int line, const char *what){
     t=ty_find(t);
     if(t->k==TY_VAR) return pending(c,line,what);
     if(t->k==TY_STR) return TY_STR_T;
-    if(t->k==TY_BYTES) return TY_INT_T;
+    if(t->k==TY_BYTES||t->k==TY_BYTEARRAY) return TY_INT_T;
     if(t->k==TY_LIST||t->k==TY_SET) return t->elem;
     if(t->k==TY_DICT) return ty_dkey(t);
     if(t->k==TY_FILE) return t->elem?t->elem:TY_STR_T;   /* its lines */

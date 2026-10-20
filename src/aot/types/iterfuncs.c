@@ -97,7 +97,7 @@ Ty *gen_as_list(Ck *c, Expr *e, int i){
     if(i>=e->count) return NULL;
     Expr *a=e->items[i];
     Ty *t=ty_find(ck_expr(c,a));
-    if((t->k!=TY_GEN && t->k!=TY_BYTES) || a->akind) return t;     /* a generator or bytes: list(...) of it */
+    if((t->k!=TY_GEN && t->k!=TY_BYTES && t->k!=TY_BYTEARRAY) || a->akind) return t;     /* a generator or bytes: list(...) of it */
     Expr *call=xnew(EXPR_CALL,a->line), *nm=xnew(EXPR_NAME,a->line); nm->name="\001list"; call->a=nm; xpush(call,a);
     e->items[i]=call;
     return ck_expr(c,call);

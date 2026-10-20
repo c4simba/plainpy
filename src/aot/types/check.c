@@ -180,7 +180,7 @@ static void final_class(Ck *c, AClass *cls){
 
 AProg *aot_check(AotUnit **units, int nunits, AotTarget target){
     if(!TY_INT_T){ TY_INT_T=ty_new(TY_INT,NULL,NULL); TY_BOOL_T=ty_new(TY_BOOL,NULL,NULL); TY_FLOAT_T=ty_new(TY_FLOAT,NULL,NULL);
-        TY_STR_T=ty_new(TY_STR,NULL,NULL); TY_VOID_T=ty_new(TY_VOID,NULL,NULL); TY_BUF_T=ty_new(TY_BUF,NULL,NULL); TY_BYTES_T=ty_new(TY_BYTES,NULL,NULL); TY_TYPE_T=ty_new(TY_TYPE,NULL,NULL); }
+        TY_STR_T=ty_new(TY_STR,NULL,NULL); TY_VOID_T=ty_new(TY_VOID,NULL,NULL); TY_BUF_T=ty_new(TY_BUF,NULL,NULL); TY_BYTES_T=ty_new(TY_BYTES,NULL,NULL); TY_TYPE_T=ty_new(TY_TYPE,NULL,NULL); TY_BYTEARRAY_T=ty_new(TY_BYTEARRAY,NULL,NULL); }
     AProg *p=PPY_NEW0(AProg); p->target=target;
     Ck ck; memset(&ck,0,sizeof ck); ck.p=p; Ck *c=&ck;
     if(setjmp(ck.fail)) return NULL;

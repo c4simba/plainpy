@@ -186,6 +186,25 @@ int gen_tmethod(F *f, Expr *e, XInfo *xi){
     if(t0->k==TY_FLOAT && !strcmp(m,"is_integer")){             /* x - round(x) == 0 (a NaN for inf and nan) */
         gen_as(f,obj,TY_FLOAT_T,0); E(f,"fld st0"); E(f,"frndint"); E(f,"fsubp st1,st0"); E(f,"ftst"); E(f,"fnstsw ax"); E(f,"fstp st0"); E(f,"sahf");
         E(f,"sete al"); E(f,"setnp cl"); E(f,"and al,cl"); E(f,"movzx eax,al"); return 0; }
+    if(t0->k==TY_BYTEARRAY){                                    /* (what only reads it: bytes(b).m(), see the checker) */
+        gen_recv(f,obj,m);
+        if(!strcmp(m,"reverse")){ CALLRT(f,"rt_ba_reverse"); return 0; }
+        if(!strcmp(m,"clear")){ CALLRT(f,"rt_list_clear"); return 0; }
+        if(!strcmp(m,"copy")){ CALLRT(f,"rt_ba_copy"); return 1; }
+        E(f,"push eax");
+        if(!strcmp(m,"append")){ gen_as(f,a0,TY_INT_T,0); CALLRT(f,"rt_ba_add"); E(f,"add esp,4"); return 0; }
+        if(!strcmp(m,"pop")){ if(a0){ gen(f,a0); to_i32(f,TY(a0)); } else E(f,"or eax,-1");
+            E(f,"mov edx,eax"); E(f,"pop eax"); CALLRT(f,"rt_ba_pop"); widen(f,0); return 0; }
+        if(!strcmp(m,"insert")){ gen(f,a0); to_i32(f,TY(a0)); E(f,"push eax"); gen_as(f,a1,TY_INT_T,0); push_value(f,TY_INT_T);
+            E(f,"mov eax,[esp+12]"); E(f,"mov edx,[esp+8]"); CALLRT(f,"rt_ba_insert"); E(f,"add esp,16"); return 0; }
+        if(!strcmp(m,"remove")){ gen_as(f,a0,TY_INT_T,0); E(f,"mov ecx,eax"); E(f,"pop eax"); CALLRT(f,"rt_ba_remove"); return 0; }
+        if(!strcmp(m,"extend")){
+            Ty *ak=ty_find(TY(a0));
+            if(ak->k==TY_BYTES||ak->k==TY_BYTEARRAY){ gen_borrow(f,a0); E(f,"mov edx,eax"); E(f,"pop eax"); CALLRT(f,ak->k==TY_BYTES?"rt_ba_extend_b":"rt_ba_extend_ba"); return 0; }
+            if(ak->k==TY_LIST) gen_borrow(f,a0); else { gen_list_of(f,a0,TY_INT_T); hold(f); }
+            E(f,"mov edx,eax"); E(f,"pop eax"); CALLRT(f,"rt_ba_extend_list"); return 0; }
+        cg_fail(e->line,"unsupported bytearray method");
+    }
     if(t0->k==TY_LIST){
         Ty *el=t0->elem; int es=esize(el);
         gen_recv(f,obj,m);
