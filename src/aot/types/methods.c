@@ -156,6 +156,28 @@ Ty *ck_tmethod(Ck *c, Expr *e, Ty *t, const char *m){
         if(!strcmp(m,"partition")||!strcmp(m,"rpartition")){ NARGS(1,1); expect(c,TY_BYTES_T,arg(c,e,0),line,"the separator"); Ty *three[3]={TY_BYTES_T,TY_BYTES_T,TY_BYTES_T}; return ty_tuple(three,3); }
         if(!strcmp(m,"removeprefix")||!strcmp(m,"removesuffix")){ NARGS(1,1); expect(c,TY_BYTES_T,arg(c,e,0),line,"the argument"); return TY_BYTES_T; }
         if(!strcmp(m,"splitlines")){ NARGS(0,1); if(e->count){ Ty *k=ty_find(arg(c,e,0)); if(k->k!=TY_BOOL&&k->k!=TY_INT) ck_err(c,line,"splitlines() takes a bool, not %s",ty_name(k)); } return ty_new(TY_LIST,TY_BYTES_T,NULL); }
+    } else if(t->k==TY_BYTEARRAY){
+        if(!strcmp(m,"append")){ NARGS(1,1); expect(c,TY_INT_T,arg(c,e,0),line,"a byte"); return TY_VOID_T; }
+        if(!strcmp(m,"extend")){ NARGS(1,1); genexp_as_list(e,0);
+            Ty *a=ty_find(ck_expr(c,e->items[0])); if(a->k==TY_VAR) return pending(c,line,"the argument of extend()");
+            if(a->k==TY_BYTES||a->k==TY_BYTEARRAY) return TY_VOID_T;
+            a=ty_find(gen_as_list(c,e,0));
+            if(a->k!=TY_LIST||!unify(c,a->elem,TY_INT_T)) ck_err(c,line,"extend() needs bytes, a bytearray or a list of int, not %s",ty_name(a));
+            return TY_VOID_T; }
+        if(!strcmp(m,"pop")){ NARGS(0,1); if(e->count) expect(c,TY_INT_T,arg(c,e,0),line,"pop() index"); return TY_INT_T; }
+        if(!strcmp(m,"insert")){ NARGS(2,2); expect(c,TY_INT_T,arg(c,e,0),line,"insert() index"); expect(c,TY_INT_T,arg(c,e,1),line,"a byte"); return TY_VOID_T; }
+        if(!strcmp(m,"remove")){ NARGS(1,1); expect(c,TY_INT_T,arg(c,e,0),line,"a byte"); return TY_VOID_T; }
+        if(!strcmp(m,"reverse")||!strcmp(m,"clear")){ NARGS(0,0); return TY_VOID_T; }
+        if(!strcmp(m,"copy")){ NARGS(0,0); return TY_BYTEARRAY_T; }
+        if(!strcmp(m,"decode")||!strcmp(m,"hex")||!strcmp(m,"find")||!strcmp(m,"rfind")||!strcmp(m,"index")||!strcmp(m,"rindex")
+           ||!strcmp(m,"count")||!strcmp(m,"startswith")||!strcmp(m,"endswith")||bytes_is_mode(m)>=0){
+            Expr *obj=e->a->a, *call=xnew(EXPR_CALL,line);       /* what only reads it: bytes(b).m(...) */
+            call->a=name_expr("\001bytes",line); xpush(call,obj); e->a->a=call;
+            return ck_tmethod(c,e,ty_find(ck_expr(c,call)),m); }
+        if(!strcmp(m,"strip")||!strcmp(m,"lstrip")||!strcmp(m,"rstrip")||!strcmp(m,"split")||!strcmp(m,"rsplit")||!strcmp(m,"replace")
+           ||!strcmp(m,"join")||!strcmp(m,"partition")||!strcmp(m,"rpartition")||!strcmp(m,"splitlines")||bytes_case_mode(m)>=0
+           ||!strcmp(m,"removeprefix")||!strcmp(m,"removesuffix"))
+            ck_err(c,line,"bytearray.%s() is not supported in compiled code: bytes(b).%s() gives bytes",m,m);
     } else if(t->k==TY_INT||t->k==TY_BOOL){
         if(!strcmp(m,"to_bytes")){ static const char *const n_tb[]={"length","byteorder","signed"}; kw_to_pos(c,e,m,n_tb,3); NARGS(0,3);
             if(e->count>0 && !is_none(e->items[0])) expect(c,TY_INT_T,arg(c,e,0),line,"length");

@@ -117,13 +117,14 @@ void ck_stmt(Ck *c, Stmt *s){
                     if(o->k==TY_OBJ && aot_find_method(o->cls,"__ppy_delslice__") && d->n==1){   /* del obj[a:b]: obj.__ppy_delslice__(a, b, None) */
                         s->kind=STMT_EXPR; s->expr=slice_call(t,"__ppy_delslice__",s->line); s->aux=NULL; s->ntargets=0; s->targets=NULL;
                         ck_stmt(c,s); return; }
-                    if(o->k!=TY_LIST || o->tup) ck_err(c,s->line,"'%s' object does not support item deletion",ty_name(o));
+                    if((o->k!=TY_LIST || o->tup) && o->k!=TY_BYTEARRAY) ck_err(c,s->line,"'%s' object does not support item deletion",ty_name(o));
                     xinfo(t)->ty=o; continue; }
                 if(t->kind==EXPR_ATTRIBUTE) ck_err(c,s->line,"del obj.attr is not supported in compiled code: an object's fields are fixed");
                 if(t->kind!=EXPR_INDEX) ck_err(c,s->line,"cannot delete this in compiled code");
                 Ty *o=ty_find(ck_expr(c,t->a)), *k=ck_expr(c,t->b);
                 if(o->k==TY_VAR){ pending(c,s->line,"the container"); continue; }
                 if(o->k==TY_LIST) expect(c,TY_INT_T,k,s->line,"a list index");
+                else if(o->k==TY_BYTEARRAY) expect(c,TY_INT_T,k,s->line,"a bytearray index");
                 else if(o->k==TY_DICT) expect(c,ty_dkey(o),k,s->line,"a dictionary key");
                 else if(o->k==TY_OBJ && aot_find_method(o->cls,"__delitem__") && d->n==1){      /* del obj[key]: obj.__delitem__(key) */
                     Expr *at=xnew(EXPR_ATTRIBUTE,s->line); at->a=t->a; at->name="__delitem__";

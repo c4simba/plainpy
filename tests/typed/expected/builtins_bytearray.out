@@ -1,0 +1,36 @@
+bytearray(b'') 0 False bytearray(b'')
+bytearray(b'hello, world!\n') 14 True
+104 10 bytearray(b'ello') bytearray(b'hl r!') bytearray(b'd!\n') bytearray(b'')
+b'hello, world!\n' b'hello' hello, world! hello
+68656c6c6f2c20776f726c64210a 68656c
+bytearray(b'\x00\x00\x00\x00') bytearray(b'abc') bytearray(b'\x01\x02\xff') bytearray(b'h\xc3\xa9llo') bytearray(b'\x00\x00\x00\x00')
+bytearray(b'Hello worlD')
+bytearray(b'Hello There')
+bytearray(b'Hi There') 8
+bytearray(b'i Ther')
+bytearray(b'iher')
+bytearray(b'xiherzy')
+121 120 bytearray(b'iherz')
+bytearray(b'iher')
+bytearray(b'rehi')
+bytearray(b'rehi') bytearray(b'rehi\x00') False True True
+bytearray(b'') 0 True True
+True False True False
+4 -1 1 5 5 1 6
+True True False
+1108 [97, 98, 114, 97] 1108 114 97
+bytearray(b'abracadabra!') bytearray(b'abracadabra?') b'<abracadabra>' bytearray(b'abracadabraabracadabra') 0
+True True True
+bytearray(b'abracadabra') [bytearray(b'abracadabra')] bytearray(b'abracadabra')
+bytearray(b'ABC') ABC
+b'ab' b'cdef' bytearray(b'gh') 2
+[bytearray(b'xx'), bytearray(b'yy')] [2, 2]
+100000 159 255 0 320
+bytearray(b'ababab!') True
+ValueError: byte must be in range(0, 256)
+ValueError: byte must be in range(0, 256)
+IndexError: bytearray index out of range
+IndexError: bytearray index out of range
+IndexError: pop from empty bytearray
+ValueError: value not found in bytearray
+ValueError: byte must be in range(0, 256)

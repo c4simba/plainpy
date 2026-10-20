@@ -61,8 +61,17 @@ jobs:
         run: make test-port
       - name: TLS (ssl over OpenSSL 3) against CPython's
         run: TARGET=${{ matrix.arch == 'x86_64' && 'linux' || 'none' }} make test-ssl
+      - name: CPython 3.14 for the requests tests (what tests/requests/client.out is)
+        id: refpy
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          update-environment: false
       - name: requests (lib/requests) against CPython's http.server
-        run: TARGET=${{ matrix.arch == 'x86_64' && 'linux' || 'none' }} make test-requests
+        run: |
+          "${{ steps.refpy.outputs.python-path }}" -m venv "$RUNNER_TEMP/refpy"
+          "$RUNNER_TEMP/refpy/bin/pip" install -q requests==2.32.5 urllib3==2.0.7
+          PYTHON="$RUNNER_TEMP/refpy/bin/python" TARGET=${{ matrix.arch == 'x86_64' && 'linux' || 'none' }} make test-requests
       - name: Bytecode files
         run: make test-bytecode
       - name: Packages
@@ -104,8 +113,17 @@ jobs:
         run: |
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
           make test-ssl
+      - name: CPython 3.14 for the requests tests (what tests/requests/client.out is)
+        id: refpy
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          update-environment: false
       - name: requests (lib/requests) against CPython's http.server
-        run: make test-requests
+        run: |
+          "${{ steps.refpy.outputs.python-path }}" -m venv "$RUNNER_TEMP/refpy"
+          "$RUNNER_TEMP/refpy/bin/pip" install -q requests==2.32.5 urllib3==2.0.7
+          PYTHON="$RUNNER_TEMP/refpy/bin/python" make test-requests
       - name: Bytecode files
         run: make test-bytecode
       - name: Tarball

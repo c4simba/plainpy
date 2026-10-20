@@ -464,13 +464,21 @@ count = "zero"                         # error: variable 'count' is int, cannot 
 - `Optional[str]` (`str | None`, `Union[str, None]`) is a `str` whose `None`
   prints as `None` and is written as `null` by `json.dumps` (a plain `str`'s
   zero value is `""`);
-- types: `int`, `bool`, `float`, `str`, `list[T]`, `set[T]`, `dict[K, V]`
+- types: `int`, `bool`, `float`, `str`, `bytes`, `bytearray`, `list[T]`, `set[T]`, `dict[K, V]`
   (keys: `int`, `str`, tuples or objects), `tuple[A, B, ...]`, `tuple[T, ...]`,
   `Callable[[A, B], R]` (functions as values), `Iterator[T]` /
   `Generator[T, None, None]` (generators), classes (also `"Class"` forward
   references, `module.Class`), `sys.buffer`; `typing`'s `List`, `Dict`, `Set`,
   `Tuple`, `Optional[T]` (just `T`: `None` is its zero value), `Iterable`,
   `Sequence`, `Mapping` are understood too;
+- a `bytearray` is a list whose items are bytes, a byte a slot: `append`,
+  `extend` (bytes, a bytearray, ints), `+=` (in place), `insert`, `pop`,
+  `remove`, `del b[i]` / `del b[a:b]`, item and slice assignment, `clear`,
+  `copy`, `reverse`, `+`, `*`, iteration (ints), `len`, comparisons and `in`
+  with bytes; `bytes(b)` copies it. Its methods that only read it (`decode`,
+  `hex`, `find`, `count`, `index`, `startswith`, `isalpha` ...) run on
+  `bytes(b)`; those that make a new one (`strip`, `split`, `replace` ...) are
+  compile errors - `bytes(b).strip()` gives bytes;
 - a dict keeps its entries in insertion order, as CPython's: an array of
   them and an index of hashes; `del d[k]` and `d.pop(k)` leave a hole in
   the array (constant time) that goes when the table fills up or something

@@ -4,7 +4,7 @@
 #include "gen.h"
 
 /* ---- truth values ---- */
-static int has_length(Ty *t){ t=ty_find(t); return t->k==TY_STR||t->k==TY_BYTES||t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_BUF; }
+static int has_length(Ty *t){ t=ty_find(t); return t->k==TY_STR||t->k==TY_BYTES||t->k==TY_BYTEARRAY||t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_BUF; }
 /* eax = truth of the value in eax/st0 (references stay put) */
 static void truth_of(F *f, Ty *t);
 void truth(F *f, Ty *t){
@@ -114,8 +114,16 @@ static void jcc64(F *f, int code, int want, int label){
     E(f,"j%s L%d",want?cc:neg_cc(cc),label);
 }
 /* Left value pushed on the machine stack, right in eax/st0 -> eax = bool. */
+/* a bytearray compared with bytes, or looked into: its bytes (a copy) instead */
+static void ba_as_bytes(F *f, Ty **ta, Ty **tb, int both){
+    if((*tb)->k==TY_BYTEARRAY){ CALLRT(f,"rt_bytes_of_ba"); hold(f); *tb=TY_BYTES_T; }
+    if(both && (*ta)->k==TY_BYTEARRAY){
+        E(f,"pop edx"); E(f,"push eax"); E(f,"mov eax,edx"); CALLRT(f,"rt_bytes_of_ba"); hold(f);
+        E(f,"mov edx,eax"); E(f,"pop eax"); E(f,"push edx"); *ta=TY_BYTES_T; }
+}
 static void cmp_finish(F *f, int code, Ty *ta, Ty *tb, int line){
     ta=ty_find(ta); tb=ty_find(tb);
+    if(ta->k==TY_BYTEARRAY||tb->k==TY_BYTEARRAY) ba_as_bytes(f,&ta,&tb,ta->k!=TY_INT&&ta->k!=TY_BOOL);
     if(code==CMP_IN||code==CMP_NOTIN){
         if(tb->k==TY_STR||(tb->k==TY_BYTES&&ta->k==TY_BYTES)){ E(f,"pop edx"); CALLRT(f,"rt_str_contains"); if(code==CMP_NOTIN) E(f,"xor eax,1"); return; }
         if(tb->k==TY_BYTES){                                    /* a byte value in bytes */

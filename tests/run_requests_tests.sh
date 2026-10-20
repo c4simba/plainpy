@@ -2,7 +2,9 @@
 # requests (lib/requests/): tests/requests/client.py against tests/requests/server.py (CPython's
 # http.server, over HTTP and TLS) - plainpy's interpreter and a compiled program must print
 # tests/requests/client.out, what CPython with the real requests prints (when it has requests,
-# that is checked too: the expected output is still CPython's).
+# that is checked too: the expected output is still CPython's). client.out is CPython 3.14's with
+# requests 2.32.5 and urllib3 2.0.7 - the CI runs them so: another Python orders cookies otherwise
+# (3.10: 'k=v; sess=abc'), another urllib3 asks for zstd too, requests 2.25 has no JSONDecodeError.
 #
 # Environment: PLAINPY (./plainpy), PYTHON (python3), OUT (build/requests), TARGET of the compiled
 # program (macos on a Mac, linux elsewhere - i386: it needs libssl3:i386; none: the interpreter

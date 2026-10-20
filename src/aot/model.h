@@ -25,7 +25,8 @@ typedef enum {
     TY_FUNC,                /* a function value (closure): parameters elems[0..nelems), result elem */
     TY_GEN,                 /* a generator; elem: the type of the values it yields */
     TY_BYTES,               /* immutable bytes: laid out as a str (one code point per byte) */
-    TY_TYPE                 /* a class as a value (type(x), C, int): its static descriptor - not counted */
+    TY_TYPE,                /* a class as a value (type(x), C, int): its static descriptor - not counted */
+    TY_BYTEARRAY            /* bytearray: a list whose elements are bytes (rt_kd_u8) - its items are ints */
 } TyKind;
 
 typedef struct AClass AClass;
@@ -54,7 +55,7 @@ int  ty_same(Ty *a, Ty *b);              /* structural equality of resolved type
 int  ty_opt(Ty *t);                      /* Optional[...] */
 int  ty_same_exact(Ty *a, Ty *b);        /* ty_same, Optional[...] included */
 const char *ty_name(Ty *t);              /* for messages and labels */
-extern Ty *TY_INT_T, *TY_BOOL_T, *TY_FLOAT_T, *TY_STR_T, *TY_VOID_T, *TY_BUF_T, *TY_BYTES_T, *TY_TYPE_T;
+extern Ty *TY_INT_T, *TY_BOOL_T, *TY_FLOAT_T, *TY_STR_T, *TY_VOID_T, *TY_BUF_T, *TY_BYTES_T, *TY_TYPE_T, *TY_BYTEARRAY_T;
 int is_builtin_type_name(const char *name);     /* int, str, ... as values (type objects) */
 
 /* ---- program entities ---- */

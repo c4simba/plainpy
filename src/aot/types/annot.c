@@ -196,6 +196,7 @@ Ty *type_of(Ck *c, Expr *e, int line){
     if(!strcmp(name,"float")) return ty_copy(TY_FLOAT_T);
     if(!strcmp(name,"str")) return ty_copy(TY_STR_T);
     if(!strcmp(name,"bytes")) return ty_copy(TY_BYTES_T);
+    if(!strcmp(name,"bytearray")) return ty_copy(TY_BYTEARRAY_T);
     if(!strcmp(name,"type")){                                          /* type[C]: C or a subclass of it */
         if(nargs==1 && ty_find(args[0])->k==TY_OBJ){ Ty *t=ty_new(TY_TYPE,NULL,ty_find(args[0])->cls); t->tup=1; return t; }
         return ty_copy(TY_TYPE_T); }

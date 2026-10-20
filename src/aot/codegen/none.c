@@ -60,6 +60,7 @@ int btype_match(Ty *t, const char *name){
         case TY_FLOAT: return !strcmp(name,"float");
         case TY_STR: return !strcmp(name,"str");
         case TY_BYTES: return !strcmp(name,"bytes");
+        case TY_BYTEARRAY: return !strcmp(name,"bytearray");
         case TY_LIST: return !strcmp(name,t->tup?"tuple":"list");
         case TY_TUPLE: return !strcmp(name,t->names?"dict":"tuple");
         case TY_DICT: return !strcmp(name,"dict");
@@ -71,7 +72,7 @@ int btype_match(Ty *t, const char *name){
 /* the Python name of t's values, for messages */
 const char *py_type_name(Ty *t){
     t=ty_find(t);
-    switch(t->k){ case TY_INT: return "int"; case TY_BOOL: return "bool"; case TY_FLOAT: return "float"; case TY_STR: return "str"; case TY_BYTES: return "bytes"; case TY_TYPE: return "type";
+    switch(t->k){ case TY_INT: return "int"; case TY_BOOL: return "bool"; case TY_FLOAT: return "float"; case TY_STR: return "str"; case TY_BYTES: return "bytes"; case TY_BYTEARRAY: return "bytearray"; case TY_TYPE: return "type";
         case TY_LIST: return t->tup?"tuple":"list"; case TY_DICT: return "dict"; case TY_SET: return t->tup?"frozenset":"set"; case TY_TUPLE: return t->names?"dict":"tuple";
         case TY_OBJ: return t->cls->name; case TY_FUNC: return "function"; case TY_GEN: return "generator"; case TY_FILE: return "TextIOWrapper";
         case TY_BUF: return "buffer"; case TY_TASK: return "Task"; default: return "NoneType"; }

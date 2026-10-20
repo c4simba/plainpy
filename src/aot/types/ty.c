@@ -5,7 +5,7 @@
 #include "check.h"
 
 int ty_ids;
-Ty *TY_INT_T, *TY_BOOL_T, *TY_FLOAT_T, *TY_STR_T, *TY_VOID_T, *TY_BUF_T, *TY_BYTES_T, *TY_TYPE_T;
+Ty *TY_INT_T, *TY_BOOL_T, *TY_FLOAT_T, *TY_STR_T, *TY_VOID_T, *TY_BUF_T, *TY_BYTES_T, *TY_TYPE_T, *TY_BYTEARRAY_T;
 
 Ty *ty_new(TyKind k, Ty *elem, AClass *cls){ Ty *t=PPY_NEW0(Ty); t->k=k; t->elem=elem; t->cls=cls; t->id=++ty_ids;
     if(k==TY_GEN){ t->nelems=2; t->elems=PPY_NEW_ARR(Ty*,2); t->elems[0]=ty_var(); t->elems[1]=TY_VOID_T; }   /* what send() takes, what it returns (None) */
@@ -23,7 +23,7 @@ Ty *ty_func(Ty **params, int n, Ty *ret){ Ty *t=ty_tuple(params,n); t->k=TY_FUNC
 Ty *ty_find(Ty *t){ while(t && t->k==TY_VAR && t->link) t=t->link; return t; }
 int ty_opt(Ty *t){ t=ty_find(t); return t && t->opt; }
 /* the shared types (TY_INT_T ...) are never made optional: a variable gets a copy of its own */
-int ty_shared(Ty *t){ return t==TY_INT_T||t==TY_BOOL_T||t==TY_FLOAT_T||t==TY_STR_T||t==TY_BUF_T||t==TY_VOID_T||t==TY_BYTES_T||t==TY_TYPE_T; }
+int ty_shared(Ty *t){ return t==TY_INT_T||t==TY_BOOL_T||t==TY_FLOAT_T||t==TY_STR_T||t==TY_BUF_T||t==TY_VOID_T||t==TY_BYTES_T||t==TY_TYPE_T||t==TY_BYTEARRAY_T; }
 Ty *ty_copy(Ty *t){ Ty *n=ty_new(t->k,t->elem,t->cls); n->elems=t->elems; n->nelems=t->nelems; n->key=t->key; n->tup=t->tup; n->names=t->names; n->opt=t->opt; n->ndef=t->ndef; return n; }
 /* element-like parts: list/dict/set/task/generator elements, a function's result */
 int has_elem(Ty *t){ return t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_TASK||t->k==TY_GEN||t->k==TY_FUNC||t->k==TY_FILE; }
@@ -35,7 +35,7 @@ int ty_known(Ty *t){
     if(has_elem(t)) return ty_known(t->elem);
     return 1;
 }
-int ty_is_ptr(Ty *t){ t=ty_find(t); return t->k==TY_STR||t->k==TY_BYTES||t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_OBJ||t->k==TY_BUF||t->k==TY_TASK||t->k==TY_TUPLE||t->k==TY_FILE||t->k==TY_FUNC||t->k==TY_GEN; }
+int ty_is_ptr(Ty *t){ t=ty_find(t); return t->k==TY_STR||t->k==TY_BYTES||t->k==TY_BYTEARRAY||t->k==TY_LIST||t->k==TY_DICT||t->k==TY_SET||t->k==TY_OBJ||t->k==TY_BUF||t->k==TY_TASK||t->k==TY_TUPLE||t->k==TY_FILE||t->k==TY_FUNC||t->k==TY_GEN; }
 int ty_size(Ty *t){ TyKind k=ty_find(t)->k; return k==TY_FLOAT||k==TY_INT ? 8 : 4; }
 int names_eq(Ty *a, Ty *b){
     if(!a->names || !b->names) return a->names==b->names;
@@ -69,6 +69,7 @@ const char *ty_name(Ty *t){
         case TY_FLOAT: return "float";
         case TY_STR: return "str";
         case TY_BYTES: return "bytes";
+        case TY_BYTEARRAY: return "bytearray";
         case TY_TYPE: return "type";
         case TY_BUF: return "buffer";
         case TY_FILE: return "file";

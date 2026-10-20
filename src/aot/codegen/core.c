@@ -76,6 +76,7 @@ const char *kd_of(Ty *t){
         case TY_FLOAT: n=t->opt?"rt_kd_ofloat":"rt_kd_float"; break;
         case TY_STR: n="rt_kd_str"; break;
         case TY_BYTES: n="rt_kd_bytes"; break;
+        case TY_BYTEARRAY: n="rt_kd_bytearray"; break;
         case TY_TYPE: n="rt_kd_type"; break;
         case TY_TUPLE: n=gc_type(t)?"rt_kd_tuple_c":"rt_kd_tuple"; break;   /* (_c: values that can be in a cycle) */
         case TY_LIST: n=gc_type(t)?"rt_kd_list_c":"rt_kd_list"; break;

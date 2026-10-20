@@ -67,6 +67,8 @@ Ty *binop_type_m(Ck *c, TokKind op, Ty *a, Ty *b, int line, AFunc **opfn){
             if(numeric(a)&&numeric(b)) return fl?TY_FLOAT_T:TY_INT_T;
             if(a->k==TY_STR&&b->k==TY_STR) return TY_STR_T;
             if(a->k==TY_BYTES&&b->k==TY_BYTES) return TY_BYTES_T;
+            if(a->k==TY_BYTEARRAY&&(b->k==TY_BYTES||b->k==TY_BYTEARRAY)) return TY_BYTEARRAY_T;   /* (bytes + bytearray: bytes, as in CPython) */
+            if(a->k==TY_BYTES&&b->k==TY_BYTEARRAY&&op==T_PLUS) return TY_BYTES_T;
             if(a->k==TY_LIST&&b->k==TY_LIST){ if(!unify(c,a->elem,b->elem)) break; return a; }
             break;
         case T_MINUS: case T_MINUS_ASSIGN: case T_FLOOR_DIV: case T_FLOOR_DIV_ASSIGN:
@@ -79,6 +81,8 @@ Ty *binop_type_m(Ck *c, TokKind op, Ty *a, Ty *b, int line, AFunc **opfn){
             if((a->k==TY_INT||a->k==TY_BOOL)&&b->k==TY_STR) return TY_STR_T;
             if(a->k==TY_BYTES&&(b->k==TY_INT||b->k==TY_BOOL)) return TY_BYTES_T;
             if((a->k==TY_INT||a->k==TY_BOOL)&&b->k==TY_BYTES) return TY_BYTES_T;
+            if(a->k==TY_BYTEARRAY&&(b->k==TY_INT||b->k==TY_BOOL)) return TY_BYTEARRAY_T;
+            if((a->k==TY_INT||a->k==TY_BOOL)&&b->k==TY_BYTEARRAY&&op==T_STAR) return TY_BYTEARRAY_T;
             if(a->k==TY_LIST&&(b->k==TY_INT||b->k==TY_BOOL)) return a;
             break;
         case T_SLASH: case T_SLASH_ASSIGN:
@@ -135,8 +139,8 @@ void ck_compare_pair_m(Ck *c, int code, Expr *ea, Expr *eb, Ty *a, Ty *b, int li
         Ty *h=ty_find(b);
         if(h->k==TY_VAR){ pending(c,line,"the right operand of 'in'"); return; }
         if(h->k==TY_STR){ expect(c,TY_STR_T,a,line,"the left operand of 'in'"); return; }
-        if(h->k==TY_BYTES){ Ty *n=ty_find(a); if(n->k==TY_VAR){ pending(c,line,"the left operand of 'in'"); return; }
-            if(n->k!=TY_BYTES&&n->k!=TY_INT&&n->k!=TY_BOOL) ck_err(c,line,"a bytes-like object is required, not '%s'",ty_name(n)); return; }
+        if(h->k==TY_BYTES||h->k==TY_BYTEARRAY){ Ty *n=ty_find(a); if(n->k==TY_VAR){ pending(c,line,"the left operand of 'in'"); return; }
+            if(n->k!=TY_BYTES&&n->k!=TY_BYTEARRAY&&n->k!=TY_INT&&n->k!=TY_BOOL) ck_err(c,line,"a bytes-like object is required, not '%s'",ty_name(n)); return; }
         if(h->k==TY_DICT){ expect(c,ty_dkey(h),a,line,"the left operand of 'in'"); return; }
         if(h->k==TY_LIST||h->k==TY_SET){ expect(c,h->elem,a,line,"the left operand of 'in'"); return; }
         ck_err(c,line,"'in' needs a str, bytes, list, set or dict on the right, not %s",ty_name(h));
@@ -149,7 +153,7 @@ void ck_compare_pair_m(Ck *c, int code, Expr *ea, Expr *eb, Ty *a, Ty *b, int li
     if(code==CMP_EQ||code==CMP_NE){
         if(x->k==TY_OBJ&&y->k==TY_OBJ&&(aot_subclass(x->cls,y->cls)||aot_subclass(y->cls,x->cls))) return;
         if(x->k==TY_STR&&y->k==TY_STR) return;
-        if(x->k==TY_BYTES&&y->k==TY_BYTES) return;
+        if((x->k==TY_BYTES||x->k==TY_BYTEARRAY)&&(y->k==TY_BYTES||y->k==TY_BYTEARRAY)) return;
         if(x->k==TY_TYPE&&y->k==TY_TYPE) return;
         if(ty_same(x,y) && (x->k==TY_LIST||x->k==TY_SET||x->k==TY_TUPLE||x->k==TY_DICT)) return;
         if(tuple_prefix(x,y)) return;                                  /* tuples of different lengths: unequal */
@@ -158,7 +162,7 @@ void ck_compare_pair_m(Ck *c, int code, Expr *ea, Expr *eb, Ty *a, Ty *b, int li
     }
     if(x->k==TY_TUPLE && !x->names && (ty_same(x,y) || tuple_prefix(x,y))) return;
     if(x->k==TY_STR&&y->k==TY_STR) return;
-    if(x->k==TY_BYTES&&y->k==TY_BYTES) return;
+    if((x->k==TY_BYTES||x->k==TY_BYTEARRAY)&&(y->k==TY_BYTES||y->k==TY_BYTEARRAY)) return;
     if((x->k==TY_LIST||x->k==TY_SET) && x->k==y->k && unify(c,x->elem,y->elem)) return;     /* lexicographic / subsets */
     ck_err(c,line,"cannot order %s and %s",ty_name(x),ty_name(y));
 }

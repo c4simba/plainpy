@@ -6,8 +6,8 @@
 
 /* ---- iteration (for loops and comprehensions) ---- */
 
-static ItKind seq_kind(Ty *t){ t=ty_find(t); return t->k==TY_STR?IT_STR:t->k==TY_BYTES?IT_BYTES:t->k==TY_DICT?IT_KEYS:t->k==TY_TUPLE?IT_TUP:t->k==TY_GEN?IT_GEN:IT_SEQ; }
-static Ty *seq_elem(Ty *t){ t=ty_find(t); return t->k==TY_STR?TY_STR_T:t->k==TY_BYTES?TY_INT_T:t->k==TY_DICT?ty_dkey(t):t->k==TY_TUPLE?(t->nelems?t->elems[0]:TY_INT_T):t->elem; }   /* (an empty tuple: no items) */
+static ItKind seq_kind(Ty *t){ t=ty_find(t); return t->k==TY_STR?IT_STR:t->k==TY_BYTES?IT_BYTES:t->k==TY_BYTEARRAY?IT_BYTEARRAY:t->k==TY_DICT?IT_KEYS:t->k==TY_TUPLE?IT_TUP:t->k==TY_GEN?IT_GEN:IT_SEQ; }
+static Ty *seq_elem(Ty *t){ t=ty_find(t); return t->k==TY_STR?TY_STR_T:t->k==TY_BYTES||t->k==TY_BYTEARRAY?TY_INT_T:t->k==TY_DICT?ty_dkey(t):t->k==TY_TUPLE?(t->nelems?t->elems[0]:TY_INT_T):t->elem; }   /* (an empty tuple: no items) */
 /* the object a loop goes over, kept in a slot of its own: a sequence, a
    generator, obj.__iter__()'s result, a file's lines -> its kind and items */
 static ItKind iter_source(F *f, Expr *x, int *slot, Ty **elem){
@@ -107,6 +107,7 @@ void iter_value(F *f, Iter *I, int k){
     E(f,"mov ecx,[ebp%+d]",I->idx);
     if(kind==IT_STR){ E(f,"mov edx,ecx"); CALLRT(f,"rt_str_char"); return; }
     if(kind==IT_BYTES){ E(f,"movzx eax,byte [eax+12+ecx]"); E(f,"xor edx,edx"); return; }
+    if(kind==IT_BYTEARRAY){ E(f,"mov eax,[eax+16]"); E(f,"movzx eax,byte [eax+ecx]"); E(f,"xor edx,edx"); return; }   /* (its length: read again each time) */
     if(kind==IT_TUP){ E(f,"add eax,12"); load_at(f,el,"eax","ecx",esize(el)); return; }
     if(kind==IT_KEYS||(kind==IT_ITEMS&&k==0)){ E(f,"mov eax,[eax+16]"); E(f,"lea eax,[eax+ecx*8]"); load_mem(f,el,"eax",0); return; }   /* keys: 8 bytes each */
     if(kind==IT_ITEMS){ E(f,"mov eax,[eax+20]"); load_at(f,el,"eax","ecx",esize(el)); return; }

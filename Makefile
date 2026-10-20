@@ -67,7 +67,7 @@ PACK_SRC = tools/pack.c src/py_lex.c src/util.c src/inflate.c src/aot/kpack.c
 # src/aot/rtlib.c includes the generated file).
 RTLIB_ASM = $(addprefix src/aot/runtime/,$(addsuffix .asm,system exceptions memory gc str unicode_tables unicode \
             str_index str_search str_methods bytes codecs int_bytes strbuild float int64 int_text int_math none kinds \
-            list tuple set dict object file asyncio generator closure time math float_ops input)) \
+            list bytearray tuple set dict object file asyncio generator closure time math float_ops input)) \
             src/targets/kolibri/console.asm
 ifneq ($(filter-out $(RTLIB_ASM),$(wildcard src/aot/runtime/*.asm src/targets/*/*.asm)),)
 $(error RTLIB_ASM (Makefile) does not list $(filter-out $(RTLIB_ASM),$(wildcard src/aot/runtime/*.asm src/targets/*/*.asm)))

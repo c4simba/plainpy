@@ -59,6 +59,18 @@ void store_target(F *f, Expr *t, Ty *vt, int line){
               pop_value(f,fd->ty); store_mem(f,fd->ty,"ecx",fd->offset); return; }
         case EXPR_SLICE:{                                     /* xs[a:b:c] = items: the items as a list */
             Ty *v=ty_find(vt); Expr *parts[3]={t->b,t->c,t->d}; int flags=0;
+            if(ty_find(TY(t->a))->k==TY_BYTEARRAY){              /* b[a:b:c] = bytes (a bytearray, ints: made bytes) */
+                hold(f);
+                if(v->k==TY_BYTEARRAY){ CALLRT(f,"rt_bytes_of_ba"); hold(f); }
+                else if(v->k==TY_LIST){ CALLRT(f,"rt_bytes_from_list"); hold(f); }
+                int vs=f->tmp[f->tmp_used-1];
+                E(f,"sub esp,24"); gen_borrow(f,t->a); check_none(f,TY(t->a),"TypeError","'NoneType' object does not support item assignment"); E(f,"mov [esp],eax");
+                for(int k=0;k<3;k++){
+                    if(parts[k] && parts[k]->kind!=EXPR_NONE){ gen(f,parts[k]); to_i32(f,TY(parts[k])); E(f,"mov [esp+%d],eax",4+4*k); }
+                    else { flags|=1<<k; E(f,"mov dword [esp+%d],0",4+4*k); } }
+                E(f,"mov dword [esp+16],%d",flags); E(f,"mov eax,[ebp%+d]",vs); E(f,"mov [esp+20],eax");
+                CALLRT(f,"rt_ba_set_slice"); E(f,"add esp,24");
+                return; }
             if(v->k==TY_STR) CALLRT(f,"rt_str_chars");
             else if(v->k==TY_SET){ E(f,"push eax"); E(f,"mov edx,%s",kd_of(v->elem)); CALLRT(f,"rt_set_to_list"); E(f,"xchg eax,[esp]"); CALLRT(f,"rt_decref"); E(f,"pop eax"); }
             else if(v->k==TY_GEN){ E(f,"mov edx,%s",kd_of(v->elem)); CALLRT(f,"rt_gen_drain"); }
@@ -84,6 +96,12 @@ void store_target(F *f, Expr *t, Ty *vt, int line){
                 drop_value(f,m->ret,1);
                 return;
             }
+            if(ct->k==TY_BYTEARRAY){                              /* b[i] = byte */
+                conv(f,vt,TY_INT_T); push_value(f,TY_INT_T);
+                gen_borrow(f,t->a); check_none(f,ct,"TypeError","'NoneType' object does not support item assignment"); E(f,"push eax");
+                gen(f,t->b); to_i32(f,TY(t->b)); E(f,"mov edx,eax"); E(f,"pop eax");
+                CALLRT(f,"rt_ba_set"); E(f,"add esp,8");
+                return; }
             conv(f,vt,el); push_value(f,el);
             gen_borrow(f,t->a); check_none(f,ct,"TypeError","'NoneType' object does not support item assignment"); E(f,"push eax");
             if(dict){ Ty *kt=ty_dkey(ct); gen_as(f,t->b,kt,0); push_value(f,kt);
@@ -134,6 +152,22 @@ static void gen_augassign(F *f, AAssign *a, int line){
         op_defaults(f,m,2);
         call_on_top(f,m); E(f,"add esp,%d",total);
         store_target(f,t,m->ret,line);
+        return;
+    }
+    if(ty_find(cur)->k==TY_BYTEARRAY && a->aug==T_PLUS_ASSIGN){  /* bytearray += bytes extends it in place */
+        Ty *vk=ty_find(TY(v));
+        gen_borrow(f,t); check_none(f,cur,"TypeError",binop_none_msg(a->aug,cur,tv,1)); E(f,"push eax"); gen_borrow(f,v);
+        E(f,"mov edx,eax"); E(f,"pop eax"); CALLRT(f,vk->k==TY_BYTEARRAY?"rt_ba_extend_ba":"rt_ba_extend_b");
+        return;
+    }
+    if(t->kind==EXPR_INDEX && ty_find(TY(t->a))->k==TY_BYTEARRAY){   /* b[i] += n: its byte, the result checked and stored */
+        Ty *ct=TY(t->a);
+        gen_borrow(f,t->a); check_none(f,ct,"TypeError","'NoneType' object is not subscriptable"); E(f,"push eax");
+        gen(f,t->b); to_i32(f,TY(t->b)); E(f,"push eax");           /* [esp] the index, [esp+4] the bytearray */
+        E(f,"mov edx,[esp]"); E(f,"mov eax,[esp+4]"); CALLRT(f,"rt_ba_at"); widen(f,0); push_value(f,TY_INT_T);
+        gen_as(f,v,num?TY_INT_T:tv,0);
+        apply_binop(f,a->aug,TY_INT_T,TY_INT_T,tv,line); push_value(f,TY_INT_T);
+        E(f,"mov edx,[esp+8]"); E(f,"mov eax,[esp+12]"); CALLRT(f,"rt_ba_set"); E(f,"add esp,16");
         return;
     }
     if(cur->k==TY_LIST && !cur->tup && a->aug==T_PLUS_ASSIGN){   /* list += x extends in place (a tuple: a new one) */

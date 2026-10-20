@@ -186,6 +186,7 @@ void gen_list_of(F *f, Expr *x, Ty *elem){
         case TY_DICT: CALLRT(f,"rt_dict_keys"); break;
         case TY_STR: CALLRT(f,"rt_str_chars"); break;
         case TY_BYTES: CALLRT(f,"rt_bytes_list"); break;
+        case TY_BYTEARRAY: CALLRT(f,"rt_ba_list"); break;
         case TY_SET: E(f,"mov edx,%s",kd_of(t->elem)); CALLRT(f,"rt_set_to_list"); break;
         case TY_GEN: E(f,"mov edx,%s",kd_of(elem)); CALLRT(f,"rt_gen_drain"); break;
         case TY_TUPLE:{                                     /* a tuple's items, one by one */
@@ -300,6 +301,16 @@ static int gen_builtin_in(F *f, Expr *e, XInfo *xi){
     if(!strcmp(n,"bytes_encode")){ gen_codec_call(f,a0,e->items[1],e->count>2?e->items[2]:NULL,NULL,"rt_str_encode"); return 1; }
     if(!strcmp(n,"bytes_zeros")){ gen(f,a0); to_i32(f,t0); CALLRT(f,"rt_bytes_new"); return 1; }
     if(!strcmp(n,"bytes_same")) return gen(f,a0);
+    if(!strcmp(n,"bytes_ba")){ gen_borrow(f,a0); CALLRT(f,"rt_bytes_of_ba"); return 1; }
+    if(!strcmp(n,"bytearray_new")){ CALLRT(f,"rt_ba_new"); return 1; }
+    if(!strcmp(n,"bytearray_zeros")){ gen(f,a0); to_i32(f,t0); CALLRT(f,"rt_ba_zeros"); return 1; }
+    if(!strcmp(n,"bytearray_bytes")){ gen_borrow(f,a0); CALLRT(f,"rt_ba_from_bytes"); return 1; }
+    if(!strcmp(n,"bytearray_copy")){ gen_borrow(f,a0); CALLRT(f,"rt_ba_copy"); return 1; }
+    if(!strcmp(n,"bytearray_list")){ gen_borrow(f,a0);
+        if(t0->k==TY_SET){ E(f,"mov edx,%s",kd_of(t0->elem)); CALLRT(f,"rt_set_to_list"); hold(f); }
+        CALLRT(f,"rt_ba_from_list"); return 1; }
+    if(!strcmp(n,"bytearray_encode")){ gen_codec_call(f,a0,e->items[1],e->count>2?e->items[2]:NULL,NULL,"rt_str_encode"); hold(f);
+        CALLRT(f,"rt_ba_from_bytes"); return 1; }
     if(!strcmp(n,"bytes_list")){ gen_borrow(f,a0);
         if(t0->k==TY_SET){ E(f,"mov edx,%s",kd_of(t0->elem)); CALLRT(f,"rt_set_to_list"); hold(f); }
         CALLRT(f,"rt_bytes_from_list"); return 1; }

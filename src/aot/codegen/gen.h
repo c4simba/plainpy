@@ -97,7 +97,7 @@ enum { LB_CODE, LB_VALUE, LB_FREE, LB_BOUND, LB_TASK, LB_VTASK, LB_BODY, LB_GEN,
 
 #define NONE_HI_INT "0x80000000"
 
-typedef enum { IT_RANGE, IT_SEQ, IT_STR, IT_KEYS, IT_ITEMS, IT_ENUM, IT_ZIP, IT_TUP, IT_GEN, IT_BYTES } ItKind;
+typedef enum { IT_RANGE, IT_SEQ, IT_STR, IT_KEYS, IT_ITEMS, IT_ENUM, IT_ZIP, IT_TUP, IT_GEN, IT_BYTES, IT_BYTEARRAY } ItKind;
 typedef struct {
     ItKind kind;
     int top, cont, exit;

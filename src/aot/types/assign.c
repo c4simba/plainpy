@@ -59,6 +59,10 @@ void ck_store(Ck *c, Expr *t, Ty *vt, int line){
             Ty *o=ty_find(ck_expr(c,t->a)); Expr *bounds[3]={t->b,t->c,t->d};
             for(int k=0;k<3;k++) if(bounds[k] && bounds[k]->kind!=EXPR_NONE) expect(c,TY_INT_T,ck_expr(c,bounds[k]),line,"a slice bound");
             if(o->k==TY_VAR){ pending(c,line,"the list"); return; }
+            if(o->k==TY_BYTEARRAY){ Ty *v=ty_find(vt); if(v->k==TY_VAR){ pending(c,line,"the assigned value"); return; }   /* b[a:b] = bytes */
+                if(v->k!=TY_BYTES && v->k!=TY_BYTEARRAY && (v->k!=TY_LIST || !unify(c,v->elem,TY_INT_T)))
+                    ck_err(c,line,"can only assign bytes, a bytearray or a list of int to a bytearray slice, not %s",ty_name(v));
+                xi->ty=o; return; }
             if(o->k!=TY_LIST || o->tup) ck_err(c,line,"'%s' object does not support item assignment",ty_name(o));
             Ty *v=ty_find(vt); if(v->k==TY_VAR){ pending(c,line,"the assigned value"); return; }
             Ty *el= v->k==TY_STR ? TY_STR_T : (v->k==TY_LIST||v->k==TY_SET||v->k==TY_GEN) ? v->elem : NULL;
@@ -76,6 +80,7 @@ void ck_store(Ck *c, Expr *t, Ty *vt, int line){
                 AFunc *g=aot_find_method(o->cls,"__getitem__"); xi->field=NULL; xi->var=NULL; (void)g;
                 return; }
             if(o->k==TY_LIST){ expect(c,TY_INT_T,i,line,"a list index"); expect(c,o->elem,vt,line,"a list element"); xi->ty=o->elem; return; }
+            if(o->k==TY_BYTEARRAY){ expect(c,TY_INT_T,i,line,"a bytearray index"); expect(c,TY_INT_T,vt,line,"a byte"); xi->ty=TY_INT_T; return; }
             if(o->k==TY_DICT){ expect(c,ty_dkey(o),i,line,"a dictionary key"); expect(c,o->elem,vt,line,"a dictionary value"); xi->ty=o->elem; return; }
             if(o->k==TY_STR) ck_err(c,line,"strings are immutable");
             ck_err(c,line,"%s does not support item assignment",ty_name(o)); }
